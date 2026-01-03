@@ -1,12 +1,12 @@
-import mongoose from "mongoose";
+const mongoose = require("mongoose");
 
-export const connectDB = async () => {
+const connectDB = async () => {
   try {
-    // if (!process.env.MONGO_URL) {
-    //   console.log(process.env.MONGO_URL);
-    //   throw new Error("MONGO_URL is not defined in environment variables");
-    // }
-    await mongoose.connect("mongodb+srv://np03cs4a230066_db_user:iwFgzN1MKWoYIhGL@cluster0.r9xxpgb.mongodb.net/?appName=Cluster0");
+    if (!process.env.MONGO_URL) {
+      console.log(process.env.MONGO_URL);
+      throw new Error("MONGO_URL is not defined in environment variables");
+    }
+    await mongoose.connect(process.env.MONGO_URL);
     console.log("MongoDB connected successfully");
   } catch (err) {
     console.log("MongoDB connection failed");
@@ -14,3 +14,5 @@ export const connectDB = async () => {
     process.exit(1);
   }
 };
+
+module.exports = { connectDB };
