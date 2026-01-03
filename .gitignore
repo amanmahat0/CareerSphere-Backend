@@ -1,5 +1,2 @@
 .env
 node_modules
-POSTMAN_COLLECTION.json
-QUICK_TEST.md
-TEST_API.md
