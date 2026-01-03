@@ -4,22 +4,42 @@ const userSchema = new mongoose.Schema({
     fullname: {
         type: String,
         required: true,
+        trim: true,
     },
     email: {
         type: String,
         required: true,
-        unique: true,
         lowercase: true,
         trim: true,
     },
     phonenumber: {
         type: String,
-        required: true,
-        unique: true,
+        required: function() {
+            // Phone number is required only if not using Google auth
+            return !this.isGoogleAuth;
+        },
+        trim: true,
     },
     password: {
         type: String,
-        required: true,
+        required: function() {
+            // Password is required only if not using Google auth
+            return !this.isGoogleAuth;
+        },
+    },
+    // Google OAuth fields
+    googleId: {
+        type: String,
+        sparse: true,
+        default: null,
+    },
+    isGoogleAuth: {
+        type: Boolean,
+        default: false,
+    },
+    profilePicture: {
+        type: String,
+        default: null, // URL from Google profile picture
     },
     userType: {
         type: String,
@@ -31,6 +51,7 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    // Google users are automatically verified
     resetPasswordCode: {
         type: String,
         default: null,
