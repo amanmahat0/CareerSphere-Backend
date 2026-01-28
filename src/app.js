@@ -1,7 +1,6 @@
-import express from "express";
-import cors from "cors";
-import { connectDB } from "./config/db.js";
-import authRoutes from "./routes/auth.routes.js";
+const express = require("express");
+const cors = require("cors");
+const { connectDB } = require("./config/db.js");
 
 connectDB();
 
@@ -13,6 +12,5 @@ app.get("/home", (req, res) => {
   res.json({ message: "API is running... Hello world" });
 });
 
-app.use("/api/auth", authRoutes);
 
-export default app;
+module.exports = app;
