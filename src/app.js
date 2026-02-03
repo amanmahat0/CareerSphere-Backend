@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { connectDB } from "./config/db.js";
 import authRoutes from "./routes/auth.routes.js";
+import jobRoutes from "./routes/job.routes.js";
 
 connectDB();
 
@@ -14,5 +15,6 @@ app.get("/home", (req, res) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/jobs", jobRoutes);
 
 export default app;
