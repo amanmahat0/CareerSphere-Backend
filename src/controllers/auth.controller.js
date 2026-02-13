@@ -2,6 +2,9 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import User from "../models/User.model.js";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 
 
@@ -14,8 +17,8 @@ const generateVerificationCode = () => {
 const transporter = nodemailer.createTransport({
   service: "Gmail",
   auth: {
-    user: "careersphere67@gmail.com",
-    pass: "fxgb svtu zapr hkdt", // <-- MUST be App Password
+    user: process.env.EMAIL_USER || "careersphere67@gmail.com",
+    pass: process.env.EMAIL_PASS, // <-- MUST be App Password
   },
 });
 
