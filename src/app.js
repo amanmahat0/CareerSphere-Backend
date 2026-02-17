@@ -3,6 +3,7 @@ import cors from "cors";
 import { connectDB } from "./config/db.js";
 import authRoutes from "./routes/auth.routes.js";
 import jobRoutes from "./routes/job.routes.js";
+import contactRoutes from "./routes/contact.routes.js";
 
 connectDB();
 
@@ -16,5 +17,6 @@ app.get("/home", (req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/jobs", jobRoutes);
+app.use("/api/contact", contactRoutes);
 
 export default app;

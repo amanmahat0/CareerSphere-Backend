@@ -1,0 +1,183 @@
+import Contact from "../models/Contact.model.js";
+import nodemailer from "nodemailer";
+
+// Initialize nodemailer transporter
+const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+        user: "careersphere67@gmail.com",
+        pass: "fxgb svtu zapr hkdt",
+    },
+});
+
+// Submit contact form
+export const submitContactForm = async (req, res) => {
+    try {
+        const { name, email, phone, subject, message } = req.body;
+
+        // Validate required fields
+        if (!name || !email || !subject || !message) {
+            return res.status(400).json({
+                success: false,
+                message: "Name, email, subject, and message are required"
+            });
+        }
+
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid email format"
+            });
+        }
+
+        // Create contact entry
+        const contact = new Contact({
+            name,
+            email,
+            phone: phone || "",
+            subject,
+            message
+        });
+
+        await contact.save();
+
+        // Send confirmation email to user
+        try {
+            await transporter.sendMail({
+                from: "noreply@careersphere.com.np",
+                to: email,
+                subject: "CareerSphere - We received your message",
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <div style="background: linear-gradient(135deg, #1f3a8a 0%, #3b82f6 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+                            <h1 style="color: white; margin: 0; font-size: 28px;">CareerSphere</h1>
+                            <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0 0;">Thank you for contacting us!</p>
+                        </div>
+                        <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
+                            <p style="color: #333; font-size: 16px; margin-bottom: 20px;">Hi <strong>${name}</strong>,</p>
+                            <p style="color: #555; font-size: 14px; line-height: 1.6; margin-bottom: 25px;">
+                                We have received your message regarding "<strong>${subject}</strong>". Our team will review it and get back to you as soon as possible.
+                            </p>
+                            <div style="background: white; border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                                <p style="color: #999; font-size: 12px; margin: 0 0 10px 0; text-transform: uppercase;">Your Message</p>
+                                <p style="color: #333; font-size: 14px; margin: 0; white-space: pre-wrap;">${message}</p>
+                            </div>
+                            <p style="color: #555; font-size: 14px; line-height: 1.6;">
+                                Typically, we respond within 24-48 business hours.
+                            </p>
+                            <hr style="border: none; border-top: 1px solid #ddd; margin: 25px 0;">
+                            <p style="color: #999; font-size: 12px; text-align: center; margin: 0;">
+                                © 2026 CareerSphere. All rights reserved.
+                            </p>
+                        </div>
+                    </div>
+                `
+            });
+        } catch (emailError) {
+            console.error("Error sending confirmation email:", emailError);
+            // Don't fail the request if email fails
+        }
+
+        // Send notification to admin
+        try {
+            await transporter.sendMail({
+                from: "noreply@careersphere.com.np",
+                to: "support@careersphere.com.np",
+                subject: `New Contact Form: ${subject}`,
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <h2 style="color: #1f3a8a;">New Contact Form Submission</h2>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Name:</strong></td>
+                                <td style="padding: 10px; border: 1px solid #ddd;">${name}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Email:</strong></td>
+                                <td style="padding: 10px; border: 1px solid #ddd;">${email}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Phone:</strong></td>
+                                <td style="padding: 10px; border: 1px solid #ddd;">${phone || "Not provided"}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Subject:</strong></td>
+                                <td style="padding: 10px; border: 1px solid #ddd;">${subject}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Message:</strong></td>
+                                <td style="padding: 10px; border: 1px solid #ddd; white-space: pre-wrap;">${message}</td>
+                            </tr>
+                        </table>
+                    </div>
+                `
+            });
+        } catch (adminEmailError) {
+            console.error("Error sending admin notification:", adminEmailError);
+        }
+
+        return res.status(201).json({
+            success: true,
+            message: "Your message has been sent successfully. We'll get back to you soon!"
+        });
+
+    } catch (error) {
+        console.error("Contact form error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to submit contact form. Please try again later."
+        });
+    }
+};
+
+// Get all contact submissions (admin only)
+export const getAllContacts = async (req, res) => {
+    try {
+        const contacts = await Contact.find().sort({ createdAt: -1 });
+        return res.status(200).json({
+            success: true,
+            data: contacts
+        });
+    } catch (error) {
+        console.error("Get contacts error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch contacts"
+        });
+    }
+};
+
+// Update contact status (admin only)
+export const updateContactStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status, adminNotes } = req.body;
+
+        const contact = await Contact.findByIdAndUpdate(
+            id,
+            { status, adminNotes },
+            { new: true }
+        );
+
+        if (!contact) {
+            return res.status(404).json({
+                success: false,
+                message: "Contact not found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Contact updated successfully",
+            data: contact
+        });
+    } catch (error) {
+        console.error("Update contact error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update contact"
+        });
+    }
+};
