@@ -57,6 +57,44 @@ const userSchema = new mongoose.Schema({
         required: true,
         default: "applicant",
     },
+    // Company/Institution specific fields
+    companyName: {
+        type: String,
+        default: null,
+        trim: true,
+    },
+    companySize: {
+        type: String,
+        enum: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1000+", null],
+        default: null,
+    },
+    website: {
+        type: String,
+        default: null,
+        trim: true,
+    },
+    aboutCompany: {
+        type: String,
+        default: null,
+        trim: true,
+    },
+    socialMedia: {
+        facebook: {
+            type: String,
+            default: null,
+            trim: true,
+        },
+        instagram: {
+            type: String,
+            default: null,
+            trim: true,
+        },
+        linkedin: {
+            type: String,
+            default: null,
+            trim: true,
+        },
+    },
     isVerified: {
         type: Boolean,
         default: false,

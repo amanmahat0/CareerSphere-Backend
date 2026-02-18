@@ -6,6 +6,7 @@ import authRoutes from "./routes/auth.routes.js";
 import jobRoutes from "./routes/job.routes.js";
 import contactRoutes from "./routes/contact.routes.js";
 import applicantRoutes from "./routes/applicant.routes.js";
+import companyRoutes from "./routes/company.routes.js";
 
 connectDB();
 
@@ -24,5 +25,6 @@ app.use("/api/auth", authRoutes);
 app.use("/api/jobs", jobRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/applicant", applicantRoutes);
+app.use("/api/company", companyRoutes);
 
 export default app;
