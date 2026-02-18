@@ -7,6 +7,7 @@ import {
   updateProfile,
   uploadProfilePicture,
   deleteProfilePicture,
+  changePassword,
 } from "../controllers/applicant.controller.js";
 
 const router = express.Router();
@@ -52,5 +53,6 @@ router.get("/profile", getProfile);
 router.post("/profile/update", updateProfile);
 router.post("/profile/picture", upload.single("profilePicture"), uploadProfilePicture);
 router.delete("/profile/picture", deleteProfilePicture);
+router.post("/change-password", changePassword);
 
 export default router;

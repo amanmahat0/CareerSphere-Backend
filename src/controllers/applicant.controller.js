@@ -2,6 +2,7 @@ import User from "../models/User.model.js";
 import jwt from "jsonwebtoken";
 import path from "path";
 import fs from "fs";
+import bcrypt from "bcrypt";
 
 // Helper function to verify JWT token
 const verifyToken = (req) => {
@@ -193,5 +194,65 @@ export const deleteProfilePicture = async (req, res) => {
   } catch (error) {
     console.error("Error deleting profile picture:", error);
     res.status(500).json({ message: error.message || "Failed to delete profile picture" });
+  }
+};
+
+// Change password
+export const changePassword = async (req, res) => {
+  try {
+    const decoded = verifyToken(req);
+    const { oldPassword, newPassword, confirmPassword } = req.body;
+
+    // Validation
+    if (!oldPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ message: "New password and confirm password do not match" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "New password must be at least 6 characters long" });
+    }
+
+    // Find user
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Check if user signed up with Google (no password)
+    if (user.isGoogleAuth && !user.password) {
+      return res.status(400).json({ 
+        message: "Cannot change password for Google authenticated accounts. Please use Google to sign in." 
+      });
+    }
+
+    // Verify old password
+    const isPasswordValid = await bcrypt.compare(oldPassword, user.password);
+    if (!isPasswordValid) {
+      return res.status(400).json({ message: "Current password is incorrect" });
+    }
+
+    // Check if new password is same as old password
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    if (isSamePassword) {
+      return res.status(400).json({ message: "New password must be different from current password" });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password
+    await User.findByIdAndUpdate(decoded.id, { $set: { password: hashedPassword } });
+
+    res.status(200).json({
+      success: true,
+      message: "Password changed successfully",
+    });
+  } catch (error) {
+    console.error("Error changing password:", error);
+    res.status(500).json({ message: error.message || "Failed to change password" });
   }
 };

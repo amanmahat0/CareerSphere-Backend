@@ -219,6 +219,58 @@ async function testDeleteProfilePicture() {
   return logResult('Delete Profile Picture', result);
 }
 
+async function testChangePassword() {
+  console.log('\n========================================');
+  console.log('TEST: Change Password');
+  console.log('========================================');
+  
+  // Test with missing fields
+  console.log('\n--- Test: Missing fields ---');
+  let result = await makeRequest('/applicant/change-password', {
+    method: 'POST',
+    body: { oldPassword: 'test' },
+  });
+  console.log(`   ${result.status === 400 ? '✅' : '❌'} Missing fields: ${result.data.message}`);
+
+  // Test with mismatched passwords
+  console.log('\n--- Test: Mismatched passwords ---');
+  result = await makeRequest('/applicant/change-password', {
+    method: 'POST',
+    body: { 
+      oldPassword: 'wrongpassword',
+      newPassword: 'newpass123',
+      confirmPassword: 'different123'
+    },
+  });
+  console.log(`   ${result.status === 400 ? '✅' : '❌'} Mismatch: ${result.data.message}`);
+
+  // Test with short password
+  console.log('\n--- Test: Short password ---');
+  result = await makeRequest('/applicant/change-password', {
+    method: 'POST',
+    body: { 
+      oldPassword: 'wrongpassword',
+      newPassword: '123',
+      confirmPassword: '123'
+    },
+  });
+  console.log(`   ${result.status === 400 ? '✅' : '❌'} Short password: ${result.data.message}`);
+
+  // Test with wrong old password
+  console.log('\n--- Test: Wrong current password ---');
+  result = await makeRequest('/applicant/change-password', {
+    method: 'POST',
+    body: { 
+      oldPassword: 'wrongpassword',
+      newPassword: 'newpassword123',
+      confirmPassword: 'newpassword123'
+    },
+  });
+  console.log(`   ${result.status === 400 ? '✅' : '❌'} Wrong old password: ${result.data.message}`);
+
+  return true;
+}
+
 // ========== RUN ALL TESTS ==========
 
 async function runAllTests() {
@@ -257,6 +309,7 @@ async function runAllTests() {
     { name: 'Partial Profile Update', fn: testUpdateProfilePartial },
     { name: 'Update Applicant Type', fn: testUpdateApplicantType },
     { name: 'Delete Profile Picture', fn: testDeleteProfilePicture },
+    { name: 'Change Password', fn: testChangePassword },
   ];
 
   for (const test of tests) {
