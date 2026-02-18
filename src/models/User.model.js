@@ -39,7 +39,17 @@ const userSchema = new mongoose.Schema({
     },
     profilePicture: {
         type: String,
-        default: null, // URL from Google profile picture
+        default: null, // URL from Google profile picture or uploaded file
+    },
+    address: {
+        type: String,
+        default: null,
+        trim: true,
+    },
+    applicantType: {
+        type: String,
+        enum: ["Student", "Fresh Graduate", "Experienced", "Career Changer"],
+        default: "Student",
     },
     userType: {
         type: String,
