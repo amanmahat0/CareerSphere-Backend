@@ -34,6 +34,34 @@ const jobSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
+    skills: {
+        type: [String],
+        default: [],
+    },
+    deadline: {
+        type: String,
+        default: "",
+    },
+    logo: {
+        type: String,
+        default: "💼",
+    },
+    requirements: {
+        type: [String],
+        default: [],
+    },
+    responsibilities: {
+        type: [String],
+        default: [],
+    },
+    benefits: {
+        type: [String],
+        default: [],
+    },
+    applicants: {
+        type: Number,
+        default: 0,
+    },
 });
 
 const Job = mongoose.model("Job", jobSchema);

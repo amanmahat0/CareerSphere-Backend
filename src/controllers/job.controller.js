@@ -3,7 +3,21 @@ import Job from "../models/Job.model.js";
 // Create a new job posting
 export const createJob = async (req, res) => {
     try {
-        const { title, company, type, location, duration, description, salary } = req.body;
+        const { 
+            title, 
+            company, 
+            type, 
+            location, 
+            duration, 
+            description, 
+            salary,
+            skills,
+            deadline,
+            logo,
+            requirements,
+            responsibilities,
+            benefits
+        } = req.body;
 
         // Validate required fields
         if (!title || !company || !type || !location || !duration || !description || !salary) {
@@ -30,6 +44,12 @@ export const createJob = async (req, res) => {
             duration,
             description,
             salary,
+            skills: skills || [],
+            deadline: deadline || "",
+            logo: logo || "💼",
+            requirements: requirements || [],
+            responsibilities: responsibilities || [],
+            benefits: benefits || [],
         });
 
         await newJob.save();
