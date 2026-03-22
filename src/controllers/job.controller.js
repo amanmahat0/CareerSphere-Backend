@@ -1,11 +1,32 @@
 import Job from "../models/Job.model.js";
+import jwt from "jsonwebtoken";
+import User from "../models/User.model.js";
+
+// Helper function to verify JWT token
+const verifyToken = (req) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) {
+    throw new Error("No token provided");
+  }
+  return jwt.verify(token, process.env.JWT_SECRET || "secret");
+};
 
 // Create a new job posting
 export const createJob = async (req, res) => {
     try {
+        const decoded = verifyToken(req);
+        
+        // Get company info from authenticated user
+        const user = await User.findById(decoded.id);
+        if (!user || !user.companyName) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Company information not found in your profile" 
+            });
+        }
+
         const { 
             title, 
-            company, 
             type, 
             location, 
             duration, 
@@ -20,7 +41,7 @@ export const createJob = async (req, res) => {
         } = req.body;
 
         // Validate required fields
-        if (!title || !company || !type || !location || !duration || !description || !salary) {
+        if (!title || !type || !location || !duration || !description || !salary) {
             return res.status(400).json({ 
                 success: false, 
                 message: "All fields are required" 
@@ -38,7 +59,7 @@ export const createJob = async (req, res) => {
 
         const newJob = new Job({
             title,
-            company,
+            company: user.companyName,
             type,
             location,
             duration,

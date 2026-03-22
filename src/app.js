@@ -8,6 +8,8 @@ import contactRoutes from "./routes/contact.routes.js";
 import applicantRoutes from "./routes/applicant.routes.js";
 import companyRoutes from "./routes/company.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
+import resumeRoutes from "./routes/resume.routes.js";
+import applicationRoutes from "./routes/application.routes.js";
 
 connectDB();
 
@@ -28,5 +30,7 @@ app.use("/api/contact", contactRoutes);
 app.use("/api/applicant", applicantRoutes);
 app.use("/api/company", companyRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/resume", resumeRoutes);
+app.use("/api/applications", applicationRoutes);
 
 export default app;
