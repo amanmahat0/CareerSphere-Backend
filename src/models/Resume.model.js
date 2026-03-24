@@ -81,7 +81,7 @@ const resumeSchema = new mongoose.Schema({
         required: true,
         trim: true,
       },
-      position: {
+      title: {
         type: String,
         required: true,
         trim: true,
@@ -163,5 +163,8 @@ resumeSchema.pre("save", function (next) {
   this.updatedAt = Date.now();
   next();
 });
+
+// Create indexes for better query performance
+resumeSchema.index({ userId: 1 });
 
 export default mongoose.model("Resume", resumeSchema);

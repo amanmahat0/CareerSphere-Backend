@@ -53,7 +53,7 @@ const userSchema = new mongoose.Schema({
     },
     userType: {
         type: String,
-        enum: ["applicant", "institution"],
+        enum: ["applicant", "institution", "admin"],
         required: true,
         default: "applicant",
     },

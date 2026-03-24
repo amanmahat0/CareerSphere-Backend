@@ -80,7 +80,7 @@ export const signup = async (req, res) => {
     }
 
     // Validate userType
-    const validUserType = userType === "institution" ? "institution" : "applicant";
+    const validUserType = ["applicant", "institution", "admin"].includes(userType) ? userType : "applicant";
     
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

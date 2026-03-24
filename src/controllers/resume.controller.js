@@ -61,7 +61,7 @@ export const saveResume = async (req, res) => {
 
     // Filter out empty entries from arrays
     const filteredEducation = (education || []).filter(e => e.degree && e.institution);
-    const filteredExperience = (experience || []).filter(e => e.position && e.company);
+    const filteredExperience = (experience || []).filter(e => e.title && e.company);
     const filteredProjects = (projects || []).filter(p => p.title);
     const filteredCertifications = (certifications || []).filter(c => c.title);
     const filteredSkills = (skills || []).filter(s => s && s.trim());
@@ -172,7 +172,21 @@ export const addEducation = async (req, res) => {
         education: [{ degree, institution, year, cgpa }],
       });
     } else {
-      resume.education.push({ degree, institution, year, cgpa });
+      // Check if this education entry already exists (prevent duplicates)
+      const exists = resume.education.some(
+        (edu) => edu.degree === degree && edu.institution === institution
+      );
+      
+      if (!exists) {
+        resume.education.push({ degree, institution, year, cgpa });
+      } else {
+        // Entry already exists, just return success to prevent duplicate
+        return res.status(200).json({
+          success: true,
+          message: "Education entry already exists",
+          data: resume,
+        });
+      }
     }
 
     await resume.save();
@@ -272,12 +286,12 @@ export const deleteEducation = async (req, res) => {
 export const addExperience = async (req, res) => {
   try {
     const decoded = verifyToken(req);
-    const { company, position, duration, description } = req.body;
+    const { company, title, duration, description } = req.body;
 
-    if (!company || !position) {
+    if (!company || !title) {
       return res.status(400).json({
         success: false,
-        message: "Company and position are required",
+        message: "Company and title are required",
       });
     }
 
@@ -286,10 +300,24 @@ export const addExperience = async (req, res) => {
     if (!resume) {
       resume = new Resume({
         userId: decoded.id,
-        experience: [{ company, position, duration, description }],
+        experience: [{ company, title, duration, description }],
       });
     } else {
-      resume.experience.push({ company, position, duration, description });
+      // Check if this experience entry already exists (prevent duplicates)
+      const exists = resume.experience.some(
+        (exp) => exp.company === company && exp.title === title
+      );
+      
+      if (!exists) {
+        resume.experience.push({ company, title, duration, description });
+      } else {
+        // Entry already exists, just return success to prevent duplicate
+        return res.status(200).json({
+          success: true,
+          message: "Experience entry already exists",
+          data: resume,
+        });
+      }
     }
 
     await resume.save();
@@ -313,7 +341,7 @@ export const updateExperience = async (req, res) => {
   try {
     const decoded = verifyToken(req);
     const { experienceId } = req.params;
-    const { company, position, duration, description } = req.body;
+    const { company, title, duration, description } = req.body;
 
     const resume = await Resume.findOne({ userId: decoded.id });
 
@@ -333,7 +361,7 @@ export const updateExperience = async (req, res) => {
     }
 
     experience.company = company || experience.company;
-    experience.position = position || experience.position;
+    experience.title = title || experience.title;
     experience.duration = duration || experience.duration;
     experience.description = description || experience.description;
 
