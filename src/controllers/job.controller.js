@@ -4,11 +4,24 @@ import User from "../models/User.model.js";
 
 // Helper function to verify JWT token
 const verifyToken = (req) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    throw new Error("No token provided");
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    throw new Error("Authorization header missing");
   }
-  return jwt.verify(token, process.env.JWT_SECRET || "secret");
+  
+  const token = authHeader.split(" ")[1];
+  if (!token) {
+    throw new Error("Bearer token not provided");
+  }
+  
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET || "secret");
+  } catch (err) {
+    if (err.name === "TokenExpiredError") {
+      throw new Error("Token has expired. Please login again.");
+    }
+    throw new Error("Invalid or malformed token");
+  }
 };
 
 // Create a new job posting
@@ -18,7 +31,16 @@ export const createJob = async (req, res) => {
         
         // Get company info from authenticated user
         const user = await User.findById(decoded.id);
-        if (!user || !user.companyName) {
+        if (!user) {
+            return res.status(401).json({ 
+                success: false, 
+                message: "User not found. Please login again." 
+            });
+        }
+
+        // Use companyName if available, otherwise use fullname (for backward compatibility)
+        const companyName = user.companyName || user.fullname;
+        if (!companyName) {
             return res.status(400).json({ 
                 success: false, 
                 message: "Company information not found in your profile" 
@@ -59,7 +81,7 @@ export const createJob = async (req, res) => {
 
         const newJob = new Job({
             title,
-            company: user.companyName,
+            company: companyName,
             type,
             location,
             duration,
@@ -151,11 +173,11 @@ export const updateJob = async (req, res) => {
         const { id } = req.params;
         const updates = req.body;
 
-        const job = await Job.findByIdAndUpdate(id, updates, { 
-            new: true, 
-            runValidators: true 
-        });
-
+        // Verify token to ensure user is authenticated
+        const decoded = verifyToken(req);
+        
+        // Get the job to verify ownership
+        const job = await Job.findById(id);
         if (!job) {
             return res.status(404).json({ 
                 success: false, 
@@ -163,13 +185,27 @@ export const updateJob = async (req, res) => {
             });
         }
 
+        // Optional: Verify that the user owns this job (if you have a createdBy field)
+        // For now, we just verify they're authenticated
+        
+        const updatedJob = await Job.findByIdAndUpdate(id, updates, { 
+            new: true, 
+            runValidators: true 
+        });
+
         res.status(200).json({ 
             success: true, 
             message: "Job updated successfully", 
-            job 
+            job: updatedJob 
         });
     } catch (error) {
         console.error("Error updating job:", error);
+        if (error.message.includes("token") || error.message.includes("Token") || error.message.includes("Authorization")) {
+            return res.status(401).json({ 
+                success: false, 
+                message: error.message 
+            });
+        }
         res.status(500).json({ 
             success: false, 
             message: "Failed to update job", 
@@ -182,6 +218,9 @@ export const updateJob = async (req, res) => {
 export const deleteJob = async (req, res) => {
     try {
         const { id } = req.params;
+
+        // Verify token to ensure user is authenticated
+        const decoded = verifyToken(req);
 
         const job = await Job.findByIdAndDelete(id);
 
@@ -198,6 +237,12 @@ export const deleteJob = async (req, res) => {
         });
     } catch (error) {
         console.error("Error deleting job:", error);
+        if (error.message.includes("token") || error.message.includes("Token") || error.message.includes("Authorization")) {
+            return res.status(401).json({ 
+                success: false, 
+                message: error.message 
+            });
+        }
         res.status(500).json({ 
             success: false, 
             message: "Failed to delete job", 

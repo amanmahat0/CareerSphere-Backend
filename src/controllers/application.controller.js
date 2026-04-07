@@ -9,7 +9,16 @@ const verifyToken = (req) => {
   if (!token) {
     throw new Error("No token provided");
   }
-  return jwt.verify(token, process.env.JWT_SECRET || "secret");
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET || "secret");
+  } catch (error) {
+    if (error.name === 'JsonWebTokenError') {
+      throw new Error('Invalid token. Please login again.');
+    } else if (error.name === 'TokenExpiredError') {
+      throw new Error('Token expired. Please login again.');
+    }
+    throw error;
+  }
 };
 
 // Submit job application
@@ -114,6 +123,14 @@ export const getUserApplications = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching applications:", error);
+    
+    if (error.message === 'Invalid token. Please login again.' || error.message === 'Token expired. Please login again.') {
+      return res.status(401).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    
     res.status(401).json({
       success: false,
       message: error.message || "Authentication failed",
@@ -313,6 +330,198 @@ export const getCompanyApplications = async (req, res) => {
     res.status(400).json({
       success: false,
       message: error.message || "Error fetching company applications",
+    });
+  }
+};
+
+// Update interview step
+export const updateInterviewStep = async (req, res) => {
+  try {
+    const decoded = verifyToken(req);
+    const { id } = req.params;
+    const {
+      interviewStep,
+      interviewStatus,
+      interviewNotes,
+      // Test fields
+      testType,
+      description,
+      testDeadline,
+      testMode,
+      testLink,
+      testLocation,
+      testResult,
+      testFeedback,
+      // Interview fields
+      interviewType,
+      interviewDate,
+      interviewTime,
+      meetingLink,
+      interviewLocation,
+      interviewResult,
+      interviewFeedback,
+      // Offer fields
+      salary,
+      currency,
+      joiningDate,
+      benefits,
+      contractFile,
+      offerResponse,
+      offerResponseNotes,
+      // Hired fields
+      startDate,
+      hiredDate,
+      hiringSummary,
+    } = req.body;
+
+    const application = await Application.findById(id);
+    if (!application) {
+      return res.status(404).json({
+        success: false,
+        message: "Application not found",
+      });
+    }
+
+    // Update interview workflow fields
+    if (interviewStep) application.interviewStep = interviewStep;
+    if (interviewStatus) application.interviewStatus = interviewStatus;
+    if (interviewNotes !== undefined) application.interviewNotes = interviewNotes;
+
+    // Update test step fields
+    if (testType !== undefined) application.testType = testType;
+    if (description !== undefined) application.description = description;
+    if (testDeadline !== undefined) application.testDeadline = testDeadline ? new Date(testDeadline) : null;
+    if (testMode !== undefined) application.testMode = testMode;
+    if (testLink !== undefined) application.testLink = testLink;
+    if (testLocation !== undefined) application.testLocation = testLocation;
+    if (testResult !== undefined) application.testResult = testResult;
+    if (testFeedback !== undefined) application.testFeedback = testFeedback;
+
+    // Update interview step fields
+    if (interviewType !== undefined) application.interviewType = interviewType;
+    if (interviewDate !== undefined) application.interviewDate = interviewDate ? new Date(interviewDate) : null;
+    if (interviewTime !== undefined) application.interviewTime = interviewTime;
+    if (meetingLink !== undefined) application.meetingLink = meetingLink;
+    if (interviewLocation !== undefined) application.interviewLocation = interviewLocation;
+    if (interviewResult !== undefined) application.interviewResult = interviewResult;
+    if (interviewFeedback !== undefined) application.interviewFeedback = interviewFeedback;
+
+    // Update offer step fields
+    if (salary !== undefined) application.salary = salary;
+    if (currency !== undefined) application.currency = currency;
+    if (joiningDate !== undefined) application.joiningDate = joiningDate ? new Date(joiningDate) : null;
+    if (benefits !== undefined) application.benefits = benefits;
+    if (contractFile !== undefined) application.contractFile = contractFile;
+    if (offerResponse !== undefined) application.offerResponse = offerResponse;
+    if (offerResponseNotes !== undefined) application.offerResponseNotes = offerResponseNotes;
+
+    // Update hired step fields
+    if (startDate !== undefined) application.startDate = startDate ? new Date(startDate) : null;
+    if (hiredDate !== undefined) application.hiredDate = hiredDate ? new Date(hiredDate) : null;
+    if (hiringSummary !== undefined) application.hiringSummary = hiringSummary;
+
+    application.updatedDate = Date.now();
+    await application.save();
+
+    await application.populate([
+      { path: "userId", select: "fullname email" },
+      { path: "jobId", select: "title company" },
+    ]);
+
+    res.status(200).json({
+      success: true,
+      message: "Interview step updated successfully",
+      data: application,
+    });
+  } catch (error) {
+    console.error("Error updating interview step:", error);
+    
+    // Handle JWT-related errors
+    if (error.message === 'Invalid token. Please login again.' || error.message === 'Token expired. Please login again.') {
+      return res.status(401).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    
+    res.status(400).json({
+      success: false,
+      message: error.message || "Error updating interview step",
+    });
+  }
+};
+
+// Shortlist and reject applications
+export const shortlistApplication = async (req, res) => {
+  try {
+    const decoded = verifyToken(req);
+    const { id } = req.params;
+
+    const application = await Application.findById(id);
+    if (!application) {
+      return res.status(404).json({
+        success: false,
+        message: "Application not found",
+      });
+    }
+
+    application.status = "shortlisted";
+    application.interviewStep = "shortlisted";
+    application.interviewStatus = "pending";
+    application.updatedDate = Date.now();
+    await application.save();
+
+    await application.populate([
+      { path: "userId", select: "fullname email" },
+      { path: "jobId", select: "title company" },
+    ]);
+
+    res.status(200).json({
+      success: true,
+      message: "Application shortlisted successfully",
+      data: application,
+    });
+  } catch (error) {
+    console.error("Error shortlisting application:", error);
+    res.status(400).json({
+      success: false,
+      message: error.message || "Error shortlisting application",
+    });
+  }
+};
+
+export const rejectApplication = async (req, res) => {
+  try {
+    const decoded = verifyToken(req);
+    const { id } = req.params;
+
+    const application = await Application.findById(id);
+    if (!application) {
+      return res.status(404).json({
+        success: false,
+        message: "Application not found",
+      });
+    }
+
+    application.status = "rejected";
+    application.updatedDate = Date.now();
+    await application.save();
+
+    await application.populate([
+      { path: "userId", select: "fullname email" },
+      { path: "jobId", select: "title company" },
+    ]);
+
+    res.status(200).json({
+      success: true,
+      message: "Application rejected successfully",
+      data: application,
+    });
+  } catch (error) {
+    console.error("Error rejecting application:", error);
+    res.status(400).json({
+      success: false,
+      message: error.message || "Error rejecting application",
     });
   }
 };

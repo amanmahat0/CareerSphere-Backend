@@ -121,14 +121,21 @@ export const signup = async (req, res) => {
     // Hash password
     const hashed = await bcrypt.hash(password, 10);
 
-    // Create user
-    const user = await User.create({
+    // Create user object with optional companyName for institutions
+    const userData = {
       fullname,
       email: email.toLowerCase(),
       phonenumber: trimmedPhoneNumber,
       password: hashed,
       userType: validUserType,
-    });
+    };
+
+    // Set companyName for institution/company users
+    if (validUserType === "institution") {
+      userData.companyName = fullname;
+    }
+
+    const user = await User.create(userData);
 
     // Generate token
     const token = jwt.sign(

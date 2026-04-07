@@ -18,6 +18,15 @@ router.get("/job/:jobId", applicationController.getJobApplications);
 // Update application status
 router.put("/:id/status", applicationController.updateApplicationStatus);
 
+// Update interview step
+router.put("/:id/interview", applicationController.updateInterviewStep);
+
+// Shortlist application
+router.put("/:id/shortlist", applicationController.shortlistApplication);
+
+// Reject application
+router.put("/:id/reject", applicationController.rejectApplication);
+
 // Withdraw application
 router.delete("/:id", applicationController.withdrawApplication);
 

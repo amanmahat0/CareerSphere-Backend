@@ -99,6 +99,17 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    // Company verification fields
+    verificationStatus: {
+        type: String,
+        enum: ["pending", "approved", "rejected", null],
+        default: null,
+    },
+    rejectionReason: {
+        type: String,
+        default: null,
+        trim: true,
+    },
     // Google users are automatically verified
     resetPasswordCode: {
         type: String,

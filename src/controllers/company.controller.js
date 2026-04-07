@@ -1,4 +1,5 @@
 import User from "../models/User.model.js";
+import CompanyVerification from "../models/CompanyVerification.model.js";
 import jwt from "jsonwebtoken";
 import path from "path";
 import fs from "fs";
@@ -326,5 +327,120 @@ export const changePassword = async (req, res) => {
   } catch (error) {
     console.error("Error changing password:", error);
     res.status(500).json({ message: error.message || "Failed to change password" });
+  }
+};
+
+// Upload verification documents
+export const uploadVerificationDocuments = async (req, res) => {
+  try {
+    const decoded = verifyToken(req);
+    
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: "No files uploaded" });
+    }
+
+    const user = await User.findById(decoded.id);
+    
+    if (!user) {
+      // Clean up uploaded files
+      req.files.forEach(file => {
+        if (file.path && fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+        }
+      });
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.userType !== "institution") {
+      // Clean up uploaded files
+      req.files.forEach(file => {
+        if (file.path && fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+        }
+      });
+      return res.status(403).json({ message: "Access denied. This endpoint is for companies only." });
+    }
+
+    // Find or create verification record
+    let verification = await CompanyVerification.findOne({ companyId: decoded.id });
+    
+    if (!verification) {
+      verification = new CompanyVerification({ companyId: decoded.id });
+    }
+
+    // Add new documents to the verification record
+    const newDocuments = req.files.map((file, index) => ({
+      filename: file.filename,
+      originalName: file.originalname,
+      documentType: req.body.documentTypes?.[index] || "other",
+      filePath: `/uploads/documents/${file.filename}`,
+      uploadedAt: new Date(),
+    }));
+
+    verification.documents = [...(verification.documents || []), ...newDocuments];
+    verification.verificationStatus = "pending";
+    await verification.save();
+
+    // Update company to reset verification status if it was previously rejected
+    if (user.verificationStatus === "rejected") {
+      user.verificationStatus = "pending";
+      user.rejectionReason = null;
+      await user.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully uploaded ${newDocuments.length} document(s)`,
+      data: {
+        documents: verification.documents,
+        verificationStatus: verification.verificationStatus,
+      }
+    });
+  } catch (error) {
+    console.error("Error uploading verification documents:", error);
+    // Clean up uploaded files on error
+    if (req.files) {
+      req.files.forEach(file => {
+        if (file.path && fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+        }
+      });
+    }
+    res.status(500).json({ message: error.message || "Failed to upload verification documents" });
+  }
+};
+
+// Get company verification status and documents
+export const getVerificationStatus = async (req, res) => {
+  try {
+    const decoded = verifyToken(req);
+    
+    const user = await User.findById(decoded.id)
+      .select("-password -resetPasswordCode -resetPasswordCodeExpiry");
+    
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.userType !== "institution") {
+      return res.status(403).json({ message: "Access denied. This endpoint is for companies only." });
+    }
+
+    const verification = await CompanyVerification.findOne({ companyId: decoded.id });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        isVerified: user.isVerified,
+        verificationStatus: user.verificationStatus,
+        rejectionReason: user.rejectionReason,
+        documents: verification?.documents || [],
+        adminNotes: verification?.adminNotes,
+        verifiedAt: verification?.verifiedAt,
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching verification status:", error);
+    res.status(500).json({ message: error.message || "Failed to fetch verification status" });
   }
 };
