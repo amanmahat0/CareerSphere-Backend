@@ -1,30 +1,12 @@
 import Application from "../models/Application.model.js";
 import Resume from "../models/Resume.model.js";
 import Job from "../models/Job.model.js";
-import jwt from "jsonwebtoken";
-
-// Helper function to verify JWT token
-const verifyToken = (req) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    throw new Error("No token provided");
-  }
-  try {
-    return jwt.verify(token, process.env.JWT_SECRET || "secret");
-  } catch (error) {
-    if (error.name === 'JsonWebTokenError') {
-      throw new Error('Invalid token. Please login again.');
-    } else if (error.name === 'TokenExpiredError') {
-      throw new Error('Token expired. Please login again.');
-    }
-    throw error;
-  }
-};
+import { createNotification } from "../services/notification.service.js";
 
 // Submit job application
 export const submitJobApplication = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
+
     const { jobId, coverLetter } = req.body;
 
     // Validate input
@@ -45,7 +27,7 @@ export const submitJobApplication = async (req, res) => {
     }
 
     // Check if user has a completed resume
-    const resume = await Resume.findOne({ userId: decoded.id });
+    const resume = await Resume.findOne({ userId: req.userId });
     if (!resume || !resume.isComplete) {
       return res.status(400).json({
         success: false,
@@ -56,7 +38,7 @@ export const submitJobApplication = async (req, res) => {
     // Check if user has already applied for this job
     const existingApplication = await Application.findOne({
       jobId: jobId,
-      userId: decoded.id,
+      userId: req.userId,
     });
 
     if (existingApplication) {
@@ -69,7 +51,7 @@ export const submitJobApplication = async (req, res) => {
     // Create new application
     const application = new Application({
       jobId,
-      userId: decoded.id,
+      userId: req.userId,
       resumeId: resume._id,
       coverLetter,
     });
@@ -109,9 +91,9 @@ export const submitJobApplication = async (req, res) => {
 // Get user's applications
 export const getUserApplications = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
 
-    const applications = await Application.find({ userId: decoded.id })
+
+    const applications = await Application.find({ userId: req.userId })
       .populate("jobId", "title company type location salary")
       .populate("userId", "fullname email")
       .sort({ appliedDate: -1 });
@@ -138,10 +120,60 @@ export const getUserApplications = async (req, res) => {
   }
 };
 
+// Get user's interview schedules
+export const getInterviewSchedule = async (req, res) => {
+  try {
+
+
+    const interviews = await Application.find({ 
+      userId: req.userId,
+      interviewStep: { $in: ["test", "interview", "offer", "hired"] },
+      interviewStatus: { $ne: "completed" }
+    })
+      .populate("jobId", "title company")
+      .populate("userId", "fullname email")
+      .sort({ interviewDate: 1 });
+
+    const formattedInterviews = interviews.map(app => ({
+      id: app._id,
+      companyName: app.jobId?.company || "N/A",
+      jobTitle: app.jobId?.title || "N/A",
+      scheduledDate: app.interviewDate || app.testDeadline,
+      status: app.interviewStatus,
+      interviewStep: app.interviewStep,
+      interviewType: app.interviewType,
+      meetingLink: app.meetingLink,
+      testLink: app.testLink,
+      interviewLocation: app.interviewLocation,
+      testLocation: app.testLocation,
+    }));
+
+    res.status(200).json({
+      success: true,
+      count: formattedInterviews.length,
+      data: formattedInterviews,
+    });
+  } catch (error) {
+    console.error("Error fetching interview schedule:", error);
+    
+    if (error.message === 'Invalid token. Please login again.' || error.message === 'Token expired. Please login again.') {
+      return res.status(401).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    
+    res.status(401).json({
+      success: false,
+      message: error.message || "Authentication failed",
+    });
+  }
+};
+
 // Get application by ID
 export const getApplicationById = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
+
     const { id } = req.params;
 
     const application = await Application.findById(id)
@@ -157,7 +189,7 @@ export const getApplicationById = async (req, res) => {
     }
 
     // Check if user is the owner of the application
-    if (application.userId._id.toString() !== decoded.id) {
+    if (application.userId._id.toString() !== req.userId) {
       return res.status(403).json({
         success: false,
         message: "Unauthorized access",
@@ -180,7 +212,7 @@ export const getApplicationById = async (req, res) => {
 // Update application status (Company/Admin only)
 export const updateApplicationStatus = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
+
     const { id } = req.params;
     const { status } = req.body;
 
@@ -234,10 +266,13 @@ export const updateApplicationStatus = async (req, res) => {
 // Withdraw application
 export const withdrawApplication = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
-    const { id } = req.params;
 
-    const application = await Application.findById(id);
+    const { id } = req.params;
+    const { withdrawalReason } = req.body;
+
+    const application = await Application.findById(id)
+      .populate("userId")
+      .populate("jobId");
 
     if (!application) {
       return res.status(404).json({
@@ -247,18 +282,54 @@ export const withdrawApplication = async (req, res) => {
     }
 
     // Check if user is the owner
-    if (application.userId.toString() !== decoded.id) {
+    if (application.userId._id.toString() !== req.userId) {
       return res.status(403).json({
         success: false,
         message: "Unauthorized access",
       });
     }
 
-    await Application.findByIdAndDelete(id);
+    // Only allow withdrawal at certain stages
+    if (!["shortlisted", "test"].includes(application.interviewStep)) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot withdraw application after interview has been scheduled",
+      });
+    }
+
+    // Update application status
+    const previousStep = application.interviewStep;
+    application.status = "withdrawn";
+    application.interviewStep = "withdrawn";
+    application.withdrawalReason = withdrawalReason || "";
+    application.withdrawnAt = new Date();
+    application.updatedDate = Date.now();
+
+    if (!application.auditLog) application.auditLog = [];
+    application.auditLog.push({
+      action: "withdrew",
+      fromStep: previousStep,
+      toStep: "withdrawn",
+      performedBy: req.userId,
+      performedByRole: "applicant",
+      note: withdrawalReason,
+      timestamp: new Date(),
+    });
+
+    await application.save();
+    await application.populate([
+      { path: "userId", select: "fullname email" },
+      { path: "jobId", select: "title company" },
+    ]);
+
+    // Trigger notification to company
+    const notificationService = await import("../services/notification.service.js");
+    notificationService.notifyCompanyApplicationWithdrawn(application);
 
     res.status(200).json({
       success: true,
       message: "Application withdrawn successfully",
+      data: application,
     });
   } catch (error) {
     console.error("Error withdrawing application:", error);
@@ -272,7 +343,7 @@ export const withdrawApplication = async (req, res) => {
 // Get applications for a job (Company/Admin only)
 export const getJobApplications = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
+
     const { jobId } = req.params;
 
     const applications = await Application.find({ jobId })
@@ -297,11 +368,11 @@ export const getJobApplications = async (req, res) => {
 // Get all applications for company's jobs
 export const getCompanyApplications = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
+
     const User = (await import("../models/User.model.js")).default;
 
     // Get company user details
-    const company = await User.findById(decoded.id);
+    const company = await User.findById(req.userId);
     if (!company || !company.companyName) {
       return res.status(400).json({
         success: false,
@@ -337,7 +408,7 @@ export const getCompanyApplications = async (req, res) => {
 // Update interview step
 export const updateInterviewStep = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
+
     const { id } = req.params;
     const {
       interviewStep,
@@ -420,8 +491,128 @@ export const updateInterviewStep = async (req, res) => {
     if (hiredDate !== undefined) application.hiredDate = hiredDate ? new Date(hiredDate) : null;
     if (hiringSummary !== undefined) application.hiringSummary = hiringSummary;
 
+    // Auto-progression logic based on test/interview results
+    // If test result is submitted, automatically move candidate
+    if (testResult !== undefined && !interviewStep) {
+      if (testResult === "fail") {
+        application.interviewStep = "rejected";
+      } else if (testResult === "pass") {
+        application.interviewStep = "interview";
+      }
+    }
+
+    // If interview result is submitted, automatically move candidate
+    if (interviewResult !== undefined && !interviewStep) {
+      if (interviewResult === "rejected") {
+        application.interviewStep = "rejected";
+      } else if (interviewResult === "selected") {
+        application.interviewStep = "offer";
+      }
+    }
+
+    // If offer response is submitted, automatically move candidate
+    if (offerResponse !== undefined && !interviewStep) {
+      if (offerResponse === "accepted") {
+        application.interviewStep = "hired";
+      } else if (offerResponse === "rejected") {
+        application.interviewStep = "rejected";
+      }
+    }
+
     application.updatedDate = Date.now();
     await application.save();
+
+    // Create notifications based on updates
+    try {
+      // Notify applicant when test is assigned (testLink set without testResult)
+      if (testLink && !testResult) {
+        await createNotification(
+          application.userId,
+          "applicant",
+          "test_assigned",
+          `A test has been assigned for your application at ${application.jobId.company}.`,
+          application._id
+        );
+      }
+
+      // Notify applicant when moving to interview scheduling (after test pass)
+      if (interviewStep === "interview" && testResult === "pass") {
+        await createNotification(
+          application.userId,
+          "applicant",
+          "interview_scheduled",
+          `Congratulations! You passed the test. Your interview has been scheduled at ${application.jobId.company}.`,
+          application._id
+        );
+      }
+
+      // Notify applicant when offer is received (when moving to offer step)
+      if (interviewStep === "offer" && interviewResult === "selected") {
+        await createNotification(
+          application.userId,
+          "applicant",
+          "offer_received",
+          `Congratulations! You passed the interview. You have received a job offer from ${application.jobId.company}. Please review and respond.`,
+          application._id
+        );
+      }
+
+      // Notify applicant when hired
+      if (interviewStep === "hired" && offerResponse === "accepted") {
+        await createNotification(
+          application.userId,
+          "applicant",
+          "hired",
+          `Congratulations! Welcome to ${application.jobId.company}. We're excited to have you on board!`,
+          application._id
+        );
+      }
+
+      // Notify applicant when application is rejected
+      if (application.interviewStep === "rejected") {
+        let reason = "Your application has been rejected.";
+        if (testResult === "fail") {
+          reason = "Your test result did not meet our requirements. Thank you for your interest!";
+        } else if (interviewResult === "rejected") {
+          reason = "Your interview result did not match our expectations. Thank you for your interest!";
+        } else if (offerResponse === "rejected") {
+          reason = "Thank you for your interest. We wish you the best in your future endeavors!";
+        }
+
+        await createNotification(
+          application.userId,
+          "applicant",
+          "rejected",
+          reason,
+          application._id
+        );
+      }
+
+      // Notify company when applicant accepts offer
+      if (offerResponse === "accepted") {
+        await createNotification(
+          application.jobId.postedBy,
+          "company",
+          "offer_response",
+          `${application.userId.fullname} has accepted your offer for ${application.jobId.title}.`,
+          application._id
+        );
+      }
+
+      // Notify company when applicant rejects offer
+      if (offerResponse === "rejected") {
+        await createNotification(
+          application.jobId.postedBy,
+          "company",
+          "offer_response",
+          `${application.userId.fullname} has rejected your offer for ${application.jobId.title}.`,
+          application._id
+        );
+      }
+    } catch (notificationError) {
+      console.error("Error creating notification:", notificationError.message);
+      // Continue execution even if notification fails
+    }
 
     await application.populate([
       { path: "userId", select: "fullname email" },
@@ -454,7 +645,7 @@ export const updateInterviewStep = async (req, res) => {
 // Shortlist and reject applications
 export const shortlistApplication = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
+
     const { id } = req.params;
 
     const application = await Application.findById(id);
@@ -476,6 +667,10 @@ export const shortlistApplication = async (req, res) => {
       { path: "jobId", select: "title company" },
     ]);
 
+    // Trigger notification to applicant
+    const notificationService = await import("../services/notification.service.js");
+    notificationService.notifyApplicantShortlisted(application);
+
     res.status(200).json({
       success: true,
       message: "Application shortlisted successfully",
@@ -492,7 +687,7 @@ export const shortlistApplication = async (req, res) => {
 
 export const rejectApplication = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
+
     const { id } = req.params;
 
     const application = await Application.findById(id);
@@ -512,6 +707,10 @@ export const rejectApplication = async (req, res) => {
       { path: "jobId", select: "title company" },
     ]);
 
+    // Trigger notification to applicant
+    const notificationService = await import("../services/notification.service.js");
+    notificationService.notifyApplicantRejected(application);
+
     res.status(200).json({
       success: true,
       message: "Application rejected successfully",
@@ -523,5 +722,613 @@ export const rejectApplication = async (req, res) => {
       success: false,
       message: error.message || "Error rejecting application",
     });
+  }
+};
+
+// ============ NEW STEP-SPECIFIC HANDLERS ============
+
+/**
+ * Handle test assignment
+ */
+export const handleTestAssignment = async (req, res) => {
+  try {
+
+    const { id } = req.params;
+    const { testType, description, testDeadline, testMode, testLink, testLocation } = req.body;
+
+    const application = await Application.findById(id)
+      .populate("userId")
+      .populate("jobId");
+
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+
+    // Validate required fields
+    if (!testType || !testMode) {
+      return res.status(400).json({ success: false, message: "Test type and mode are required" });
+    }
+
+    if (testMode === "online" && !testLink) {
+      return res.status(400).json({ success: false, message: "Test link required for online test" });
+    }
+    if (testMode === "offline" && !testLocation) {
+      return res.status(400).json({ success: false, message: "Test location required for offline test" });
+    }
+
+    // Update application
+    application.interviewStep = "test";
+    application.interviewStatus = "scheduled";
+    application.testType = testType;
+    application.description = description || "";
+    application.testDeadline = testDeadline ? new Date(testDeadline) : null;
+    application.testMode = testMode;
+    application.testLink = testLink || "";
+    application.testLocation = testLocation || "";
+    application.updatedDate = Date.now();
+
+    // Add to audit log
+    if (!application.auditLog) application.auditLog = [];
+    application.auditLog.push({
+      action: "test_assigned",
+      fromStep: "shortlisted",
+      toStep: "test",
+      performedBy: req.userId,
+      performedByRole: "company",
+      timestamp: new Date(),
+    });
+
+    await application.save();
+    await application.populate([
+      { path: "userId", select: "fullname email" },
+      { path: "jobId", select: "title company" },
+    ]);
+
+    // Trigger notification
+    const notificationService = await import("../services/notification.service.js");
+    notificationService.notifyApplicantTestAssigned(application);
+
+    res.status(200).json({ success: true, message: "Test assigned successfully", data: application });
+  } catch (error) {
+    console.error("Error assigning test:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Handle test result submission
+ */
+export const handleTestResult = async (req, res) => {
+  try {
+
+    const { id } = req.params;
+    const { testResult, testFeedback } = req.body;
+
+    const application = await Application.findById(id);
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+
+    if (!testResult) {
+      return res.status(400).json({ success: false, message: "Test result is required" });
+    }
+
+    application.testResult = testResult;
+    application.testFeedback = testFeedback || "";
+    application.interviewStatus = "completed";
+    application.updatedDate = Date.now();
+
+    if (!application.auditLog) application.auditLog = [];
+    application.auditLog.push({
+      action: "test_result_submitted",
+      fromStep: "test",
+      toStep: "test",
+      performedBy: req.userId,
+      performedByRole: "company",
+      note: `Test result: ${testResult}`,
+      timestamp: new Date(),
+    });
+
+    await application.save();
+    await application.populate([
+      { path: "userId", select: "fullname email" },
+      { path: "jobId", select: "title company" },
+    ]);
+
+    res.status(200).json({ success: true, message: "Test result updated successfully", data: application });
+  } catch (error) {
+    console.error("Error updating test result:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Handle interview scheduling
+ */
+export const handleInterviewSchedule = async (req, res) => {
+  try {
+
+    const { id } = req.params;
+    const { interviewType, interviewDate, interviewTime, meetingLink, interviewLocation, interviewers } = req.body;
+
+    const application = await Application.findById(id)
+      .populate("userId")
+      .populate("jobId");
+
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+
+    if (!interviewType || !interviewDate || !interviewTime) {
+      return res.status(400).json({ success: false, message: "Interview type, date, and time are required" });
+    }
+
+    if (interviewType === "online" && !meetingLink) {
+      return res.status(400).json({ success: false, message: "Meeting link required for online interview" });
+    }
+    if (interviewType === "offline" && !interviewLocation) {
+      return res.status(400).json({ success: false, message: "Location required for offline interview" });
+    }
+
+    application.interviewStep = "interview";
+    application.interviewStatus = "scheduled";
+    application.interviewType = interviewType;
+    application.interviewDate = new Date(interviewDate);
+    application.interviewTime = interviewTime;
+    application.meetingLink = meetingLink || "";
+    application.interviewLocation = interviewLocation || "";
+    application.interviewers = interviewers || [];
+    application.updatedDate = Date.now();
+
+    if (!application.auditLog) application.auditLog = [];
+    application.auditLog.push({
+      action: "interview_scheduled",
+      fromStep: "test",
+      toStep: "interview",
+      performedBy: req.userId,
+      performedByRole: "company",
+      timestamp: new Date(),
+    });
+
+    await application.save();
+    await application.populate([
+      { path: "userId", select: "fullname email" },
+      { path: "jobId", select: "title company" },
+    ]);
+
+    // Trigger notification
+    const notificationService = await import("../services/notification.service.js");
+    notificationService.notifyApplicantInterviewScheduled(application);
+
+    // Notify interviewers if any
+    if (interviewers && interviewers.length > 0) {
+      for (const interviewer of interviewers) {
+        notificationService.notifyInterviewerInvite(
+          interviewer.email,
+          interviewer.name,
+          application.userId.fullname,
+          application.jobId.title,
+          application.interviewDate,
+          application.interviewTime,
+          application.meetingLink
+        );
+      }
+    }
+
+    res.status(200).json({ success: true, message: "Interview scheduled successfully", data: application });
+  } catch (error) {
+    console.error("Error scheduling interview:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Handle interview result submission
+ */
+export const handleInterviewResult = async (req, res) => {
+  try {
+
+    const { id } = req.params;
+    const { interviewResult, interviewFeedback } = req.body;
+
+    const application = await Application.findById(id);
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+
+    if (!interviewResult) {
+      return res.status(400).json({ success: false, message: "Interview result is required" });
+    }
+
+    application.interviewResult = interviewResult;
+    application.interviewFeedback = interviewFeedback || "";
+    application.interviewStatus = "completed";
+    application.updatedDate = Date.now();
+
+    if (!application.auditLog) application.auditLog = [];
+    application.auditLog.push({
+      action: "interview_result_submitted",
+      fromStep: "interview",
+      toStep: "interview",
+      performedBy: req.userId,
+      performedByRole: "company",
+      note: `Interview result: ${interviewResult}`,
+      timestamp: new Date(),
+    });
+
+    await application.save();
+    await application.populate([
+      { path: "userId", select: "fullname email" },
+      { path: "jobId", select: "title company" },
+    ]);
+
+    res.status(200).json({ success: true, message: "Interview result updated successfully", data: application });
+  } catch (error) {
+    console.error("Error updating interview result:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Handle offer sending
+ */
+export const handleOfferSend = async (req, res) => {
+  try {
+
+    const { id } = req.params;
+    const { salary, currency, joiningDate, benefits, contractFile, offerExpiryDate } = req.body;
+
+    const application = await Application.findById(id)
+      .populate("userId")
+      .populate("jobId");
+
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+
+    if (!salary || !joiningDate) {
+      return res.status(400).json({ success: false, message: "Salary and joining date are required" });
+    }
+
+    application.interviewStep = "offer";
+    application.interviewStatus = "offer_sent";
+    application.salary = salary;
+    application.currency = currency || "USD";
+    application.joiningDate = new Date(joiningDate);
+    application.benefits = benefits || "";
+    application.contractFile = contractFile || "";
+    application.offerExpiryDate = offerExpiryDate ? new Date(offerExpiryDate) : null;
+    application.offerResponse = "pending";
+    application.updatedDate = Date.now();
+
+    if (!application.auditLog) application.auditLog = [];
+    application.auditLog.push({
+      action: "offer_sent",
+      fromStep: "interview",
+      toStep: "offer",
+      performedBy: req.userId,
+      performedByRole: "company",
+      timestamp: new Date(),
+    });
+
+    await application.save();
+    await application.populate([
+      { path: "userId", select: "fullname email" },
+      { path: "jobId", select: "title company" },
+    ]);
+
+    // Trigger notification
+    const notificationService = await import("../services/notification.service.js");
+    notificationService.notifyApplicantOfferReceived(application);
+
+    res.status(200).json({ success: true, message: "Offer sent successfully", data: application });
+  } catch (error) {
+    console.error("Error sending offer:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Handle offer response (applicant accepting/rejecting/negotiating)
+ */
+export const handleOfferResponse = async (req, res) => {
+  try {
+
+    const { id } = req.params;
+    const {
+      offerResponse,
+      offerResponseNotes,
+      counterOfferSalary,
+      counterOfferJoiningDate,
+      counterOfferMessage,
+    } = req.body;
+
+    const application = await Application.findById(id)
+      .populate("userId")
+      .populate("jobId");
+
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+
+    if (application.userId._id.toString() !== req.userId) {
+      return res.status(403).json({ success: false, message: "Unauthorized: this is not your application" });
+    }
+
+    if (!["accepted", "rejected", "negotiating"].includes(offerResponse)) {
+      return res.status(400).json({ success: false, message: "Invalid offer response" });
+    }
+
+    application.offerResponse = offerResponse;
+    application.offerResponseNotes = offerResponseNotes || "";
+
+    if (offerResponse === "negotiating") {
+      application.counterOfferSalary = counterOfferSalary || null;
+      application.counterOfferJoiningDate = counterOfferJoiningDate ? new Date(counterOfferJoiningDate) : null;
+      application.counterOfferMessage = counterOfferMessage || "";
+    }
+
+    application.updatedDate = Date.now();
+
+    if (!application.auditLog) application.auditLog = [];
+    application.auditLog.push({
+      action: "offer_response",
+      fromStep: "offer",
+      toStep: "offer",
+      performedBy: req.userId,
+      performedByRole: "applicant",
+      note: `Offer ${offerResponse}`,
+      timestamp: new Date(),
+    });
+
+    await application.save();
+    await application.populate([
+      { path: "userId", select: "fullname email" },
+      { path: "jobId", select: "title company" },
+    ]);
+
+    // Trigger notification to company
+    const notificationService = await import("../services/notification.service.js");
+    notificationService.notifyCompanyOfferResponse(application);
+
+    res.status(200).json({ success: true, message: "Offer response recorded successfully", data: application });
+  } catch (error) {
+    console.error("Error processing offer response:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Handle hire confirmation
+ */
+export const handleHireConfirmation = async (req, res) => {
+  try {
+
+    const { id } = req.params;
+    const { startDate, hiringSummary } = req.body;
+
+    const application = await Application.findById(id)
+      .populate("userId")
+      .populate("jobId");
+
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+
+    if (!startDate) {
+      return res.status(400).json({ success: false, message: "Start date is required" });
+    }
+
+    application.interviewStep = "hired";
+    application.status = "accepted";
+    application.startDate = new Date(startDate);
+    application.hiredDate = new Date();
+    application.hiringSummary = hiringSummary || "";
+    application.updatedDate = Date.now();
+
+    if (!application.auditLog) application.auditLog = [];
+    application.auditLog.push({
+      action: "hired",
+      fromStep: "offer",
+      toStep: "hired",
+      performedBy: req.userId,
+      performedByRole: "company",
+      timestamp: new Date(),
+    });
+
+    await application.save();
+    await application.populate([
+      { path: "userId", select: "fullname email" },
+      { path: "jobId", select: "title company" },
+    ]);
+
+    // Trigger notification
+    const notificationService = await import("../services/notification.service.js");
+    notificationService.notifyApplicantHired(application);
+
+    res.status(200).json({ success: true, message: "Candidate marked as hired successfully", data: application });
+  } catch (error) {
+    console.error("Error confirming hire:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Mark test as submitted by applicant
+ */
+export const markTestSubmitted = async (req, res) => {
+  try {
+
+    const { id } = req.params;
+
+    const application = await Application.findById(id)
+      .populate("userId", "fullname email")
+      .populate("jobId", "title company");
+
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+
+    application.testSubmittedAt = new Date();
+    application.updatedDate = Date.now();
+
+    if (!application.auditLog) application.auditLog = [];
+    application.auditLog.push({
+      action: "test_submitted",
+      fromStep: "test",
+      toStep: "test",
+      performedBy: req.userId,
+      performedByRole: "applicant",
+      timestamp: new Date(),
+    });
+
+    await application.save();
+
+    res.status(200).json({ success: true, message: "Test marked as submitted", data: application });
+  } catch (error) {
+    console.error("Error marking test as submitted:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Get schedule for a specific date (check for conflicts)
+ */
+export const getScheduleForDate = async (req, res) => {
+  try {
+
+    const { date } = req.query;
+
+    if (!date) {
+      return res.status(400).json({ success: false, message: "Date query parameter is required" });
+    }
+
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Get company's jobs
+    const User = (await import("../models/User.model.js")).default;
+    const company = await User.findById(req.userId);
+
+    if (!company || !company.companyName) {
+      return res.status(400).json({ success: false, message: "Company not found" });
+    }
+
+    const jobs = await Job.find({ company: company.companyName });
+    const jobIds = jobs.map(job => job._id);
+
+    // Find interviews scheduled for this date
+    const interviews = await Application.find({
+      jobId: { $in: jobIds },
+      interviewDate: { $gte: startOfDay, $lte: endOfDay },
+    })
+      .populate("userId", "fullname email")
+      .populate("jobId", "title");
+
+    res.status(200).json({ success: true, count: interviews.length, data: interviews });
+  } catch (error) {
+    console.error("Error fetching schedule:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Get application audit log
+ */
+export const getApplicationAuditLog = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const application = await Application.findById(id);
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: application.auditLog || [],
+    });
+  } catch (error) {
+    console.error("Error fetching audit log:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Get company analytics (aggregated stats)
+ */
+export const getCompanyAnalytics = async (req, res) => {
+  try {
+
+
+    const User = (await import("../models/User.model.js")).default;
+    const company = await User.findById(req.userId);
+
+    if (!company || !company.companyName) {
+      return res.status(400).json({ success: false, message: "Company not found" });
+    }
+
+    const jobs = await Job.find({ company: company.companyName });
+    const jobIds = jobs.map(job => job._id);
+
+    // Get all applications for company
+    const allApplications = await Application.find({ jobId: { $in: jobIds } })
+      .populate("userId", "fullname")
+      .populate("jobId", "title");
+
+    // Calculate metrics
+    const total = allApplications.length;
+    const byStep = {
+      shortlisted: allApplications.filter(a => a.interviewStep === "shortlisted").length,
+      test: allApplications.filter(a => a.interviewStep === "test").length,
+      interview: allApplications.filter(a => a.interviewStep === "interview").length,
+      offer: allApplications.filter(a => a.interviewStep === "offer").length,
+      hired: allApplications.filter(a => a.interviewStep === "hired").length,
+      rejected: allApplications.filter(a => a.interviewStep === "rejected").length,
+    };
+
+    const testCandidates = allApplications.filter(a => a.interviewStep === "test" || a.testResult);
+    const testPassCount = testCandidates.filter(a => a.testResult === "pass").length;
+    const testPassRate = testCandidates.length > 0 ? ((testPassCount / testCandidates.length) * 100).toFixed(2) : 0;
+
+    const interviewCandidates = allApplications.filter(a => a.interviewStep === "interview" || a.interviewResult);
+    const offerCandidates = allApplications.filter(a => a.interviewStep === "offer" || a.interviewStep === "hired");
+    const interviewToOfferRate = interviewCandidates.length > 0 ? ((offerCandidates.length / interviewCandidates.length) * 100).toFixed(2) : 0;
+
+    const acceptedOffers = allApplications.filter(
+      a => a.interviewStep === "hired" || a.offerResponse === "accepted"
+    ).length;
+    const totalOffers = allApplications.filter(a => a.interviewStep === "offer").length;
+    const acceptanceRate = totalOffers > 0 ? ((acceptedOffers / totalOffers) * 100).toFixed(2) : 0;
+
+    let timeTohireSum = 0;
+    let hiredCount = 0;
+    allApplications.forEach(app => {
+      if (app.hiredDate && app.appliedDate) {
+        timeTohireSum += (app.hiredDate - app.appliedDate) / (1000 * 60 * 60 * 24); // Convert to days
+        hiredCount++;
+      }
+    });
+    const avgTimeToHire = hiredCount > 0 ? (timeTohireSum / hiredCount).toFixed(2) : 0;
+
+    const shortlistedRate = total > 0 ? ((byStep.shortlisted / total) * 100).toFixed(2) : 0;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalApplications: total,
+        shortlistedRate: parseFloat(shortlistedRate),
+        testPassRate: parseFloat(testPassRate),
+        interviewToOfferRate: parseFloat(interviewToOfferRate),
+        offerAcceptanceRate: parseFloat(acceptanceRate),
+        avgTimeToHireInDays: parseFloat(avgTimeToHire),
+        byStep,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching analytics:", error);
+    res.status(400).json({ success: false, message: error.message });
   }
 };

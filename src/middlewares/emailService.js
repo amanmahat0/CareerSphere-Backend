@@ -49,7 +49,7 @@ export const sendVerificationEmail = async (email, code, fullname) => {
           </div>
           <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; border-radius: 4px; margin-bottom: 25px;">
             <p style="color: #856404; font-size: 13px; margin: 0;">
-              <strong>⚠️ Security Notice:</strong> Never share this code with anyone. CareerSphere support will never ask for your verification code.
+              <strong>Security Notice:</strong> Never share this code with anyone. CareerSphere support will never ask for your verification code.
             </p>
           </div>
           <p style="color: #555; font-size: 14px; line-height: 1.6; margin-bottom: 15px;">

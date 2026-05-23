@@ -15,7 +15,7 @@ const verifyToken = (req) => {
   }
   
   try {
-    return jwt.verify(token, process.env.JWT_SECRET || "secret");
+    return jwt.verify(token, process.env.JWT_SECRET);
   } catch (err) {
     if (err.name === "TokenExpiredError") {
       throw new Error("Token has expired. Please login again.");
@@ -89,7 +89,7 @@ export const createJob = async (req, res) => {
             salary,
             skills: skills || [],
             deadline: deadline || "",
-            logo: logo || "💼",
+            logo: logo || "",
             requirements: requirements || [],
             responsibilities: responsibilities || [],
             benefits: benefits || [],
@@ -116,25 +116,39 @@ export const createJob = async (req, res) => {
 export const getAllJobs = async (req, res) => {
     try {
         const { type, location } = req.query;
-        
+
         let filter = {};
         if (type) filter.type = type;
         if (location) filter.location = { $regex: location, $options: "i" };
 
-        const jobs = await Job.find(filter)
-            .sort({ postDate: -1 });
+        const jobs = await Job.find(filter).sort({ postDate: -1 });
 
-        res.status(200).json({ 
-            success: true, 
+        // Attach company profile pictures by matching companyName
+        const companyNames = [...new Set(jobs.map(j => j.company).filter(Boolean))];
+        const companyUsers = await User.find({
+            companyName: { $in: companyNames },
+            userType: "institution",
+        }).select("companyName profilePicture");
+
+        const picMap = {};
+        companyUsers.forEach(u => { if (u.companyName) picMap[u.companyName] = u.profilePicture; });
+
+        const jobsWithLogos = jobs.map(j => ({
+            ...j.toObject(),
+            companyLogo: picMap[j.company] || j.logo || null,
+        }));
+
+        res.status(200).json({
+            success: true,
             count: jobs.length,
-            jobs 
+            jobs: jobsWithLogos,
         });
     } catch (error) {
         console.error("Error fetching jobs:", error);
-        res.status(500).json({ 
-            success: false, 
-            message: "Failed to fetch jobs", 
-            error: error.message 
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch jobs",
+            error: error.message
         });
     }
 };
@@ -147,22 +161,43 @@ export const getJobById = async (req, res) => {
         const job = await Job.findById(id);
 
         if (!job) {
-            return res.status(404).json({ 
-                success: false, 
-                message: "Job not found" 
+            return res.status(404).json({
+                success: false,
+                message: "Job not found"
             });
         }
 
-        res.status(200).json({ 
-            success: true, 
-            job 
+        // Attach full company profile
+        const companyUser = await User.findOne({
+            companyName: job.company,
+            userType: "institution",
+        }).select("profilePicture email phonenumber address companySize industry website aboutCompany socialMedia");
+
+        const jobWithLogo = {
+            ...job.toObject(),
+            companyLogo: companyUser?.profilePicture || job.logo || null,
+            companyInfo: companyUser ? {
+                email:       companyUser.email,
+                phone:       companyUser.phonenumber,
+                address:     companyUser.address,
+                companySize: companyUser.companySize,
+                industry:    companyUser.industry,
+                website:     companyUser.website,
+                about:       companyUser.aboutCompany,
+                socialMedia: companyUser.socialMedia,
+            } : null,
+        };
+
+        res.status(200).json({
+            success: true,
+            job: jobWithLogo,
         });
     } catch (error) {
         console.error("Error fetching job:", error);
-        res.status(500).json({ 
-            success: false, 
-            message: "Failed to fetch job", 
-            error: error.message 
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch job",
+            error: error.message
         });
     }
 };

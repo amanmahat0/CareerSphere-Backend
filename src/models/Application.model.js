@@ -23,7 +23,7 @@ const applicationSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ["pending", "shortlisted", "rejected", "accepted"],
+    enum: ["pending", "shortlisted", "rejected", "accepted", "withdrawn"],
     default: "pending",
   },
   appliedDate: {
@@ -37,7 +37,7 @@ const applicationSchema = new mongoose.Schema({
   // Interview Pipeline Steps
   interviewStep: {
     type: String,
-    enum: ["shortlisted", "test", "interview", "offer", "hired"],
+    enum: ["shortlisted", "test", "interview", "offer", "hired", "withdrawn", "rejected"],
     default: "shortlisted",
   },
   interviewStatus: {
@@ -85,6 +85,10 @@ const applicationSchema = new mongoose.Schema({
     type: String,
     default: "",
   },
+  testSubmittedAt: {
+    type: Date,
+    default: null,
+  },
 
   // Interview Step Fields
   interviewType: {
@@ -116,6 +120,14 @@ const applicationSchema = new mongoose.Schema({
     type: String,
     default: "",
   },
+  interviewers: [
+    {
+      name: { type: String },
+      email: { type: String },
+      role: { type: String },
+      feedbackNote: { type: String, default: "" },
+    },
+  ],
 
   // Offer Step Fields
   salary: {
@@ -140,11 +152,28 @@ const applicationSchema = new mongoose.Schema({
   },
   offerResponse: {
     type: String,
-    enum: ["pending", "accepted", "rejected"],
+    enum: ["pending", "accepted", "rejected", "negotiating", "expired"],
     default: "pending",
   },
   offerResponseNotes: {
     type: String,
+    default: "",
+  },
+  offerExpiryDate: {
+    type: Date,
+    default: null,
+  },
+  counterOfferSalary: {
+    type: Number,
+    default: null,
+  },
+  counterOfferJoiningDate: {
+    type: Date,
+    default: null,
+  },
+  counterOfferMessage: {
+    type: String,
+    maxLength: 500,
     default: "",
   },
 
@@ -161,6 +190,42 @@ const applicationSchema = new mongoose.Schema({
     type: String,
     default: "",
   },
+
+  // Withdrawal
+  withdrawalReason: {
+    type: String,
+    default: "",
+  },
+  withdrawnAt: {
+    type: Date,
+    default: null,
+  },
+
+  // Tracking Fields
+  lastViewedAt: {
+    type: Date,
+    default: null,
+  },
+  reminderSentAt: {
+    type: Date,
+    default: null,
+  },
+
+  // Audit Log
+  auditLog: [
+    {
+      action: { type: String },
+      fromStep: { type: String },
+      toStep: { type: String },
+      performedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+      performedByRole: { type: String },
+      note: { type: String },
+      timestamp: { type: Date, default: Date.now },
+    },
+  ],
 });
 
 // Create a compound unique index to prevent duplicate applications

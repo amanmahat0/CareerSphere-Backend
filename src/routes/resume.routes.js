@@ -1,7 +1,10 @@
 import express from "express";
 import * as resumeController from "../controllers/resume.controller.js";
+import auth from "../middlewares/auth.js";
 
 const router = express.Router();
+
+router.use(auth);
 
 // GET resume
 router.get("/", resumeController.getResume);

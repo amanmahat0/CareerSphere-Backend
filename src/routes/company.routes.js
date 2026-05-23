@@ -11,8 +11,11 @@ import {
   uploadVerificationDocuments,
   getVerificationStatus,
 } from "../controllers/company.controller.js";
+import auth from "../middlewares/auth.js";
 
 const router = express.Router();
+
+router.use(auth);
 
 // Ensure uploads directories exist
 const profilesDir = path.join(process.cwd(), "uploads", "profiles");

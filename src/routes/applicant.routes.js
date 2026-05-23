@@ -9,8 +9,11 @@ import {
   deleteProfilePicture,
   changePassword,
 } from "../controllers/applicant.controller.js";
+import auth from "../middlewares/auth.js";
 
 const router = express.Router();
+
+router.use(auth);
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads", "profiles");

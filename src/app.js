@@ -10,12 +10,31 @@ import companyRoutes from "./routes/company.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import resumeRoutes from "./routes/resume.routes.js";
 import applicationRoutes from "./routes/application.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
+import chatRoutes from "./routes/chat.routes.js";
 
 connectDB();
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "http://127.0.0.1:5173",
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
+}));
 
 // Serve static files for uploads
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
@@ -32,5 +51,7 @@ app.use("/api/company", companyRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/resume", resumeRoutes);
 app.use("/api/applications", applicationRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/chat", chatRoutes);
 
 export default app;

@@ -44,7 +44,7 @@ const jobSchema = new mongoose.Schema({
     },
     logo: {
         type: String,
-        default: "💼",
+        default: "",
     },
     requirements: {
         type: [String],

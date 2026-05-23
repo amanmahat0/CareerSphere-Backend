@@ -1,25 +1,14 @@
 import User from "../models/User.model.js";
 import CompanyVerification from "../models/CompanyVerification.model.js";
-import jwt from "jsonwebtoken";
 import path from "path";
 import fs from "fs";
 import bcrypt from "bcrypt";
 
-// Helper function to verify JWT token
-const verifyToken = (req) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    throw new Error("No token provided");
-  }
-  return jwt.verify(token, process.env.JWT_SECRET || "secret");
-};
-
 // Get company profile
 export const getProfile = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
-    const user = await User.findById(decoded.id).select("-password -resetPasswordCode -resetPasswordCodeExpiry");
-    
+    const user = await User.findById(req.userId).select("-password -resetPasswordCode -resetPasswordCodeExpiry");
+
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -56,81 +45,60 @@ export const getProfile = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching company profile:", error);
-    res.status(401).json({ message: error.message || "Authentication failed" });
+    res.status(500).json({ message: error.message || "Failed to fetch profile" });
   }
 };
 
 // Update company profile
 export const updateProfile = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
-    const { 
-      name, 
-      fullname, 
-      email, 
-      phone, 
-      phonenumber, 
-      address, 
-      companyName, 
-      companySize, 
-      website, 
+    const {
+      name,
+      fullname,
+      email,
+      phone,
+      phonenumber,
+      address,
+      companyName,
+      companySize,
+      website,
       aboutCompany,
-      socialMedia 
+      socialMedia
     } = req.body;
 
-    // Check if user is a company
-    const existingUser = await User.findById(decoded.id);
+    const existingUser = await User.findById(req.userId);
     if (!existingUser || existingUser.userType !== "institution") {
       return res.status(403).json({ message: "Access denied. This endpoint is for companies only." });
     }
 
     const updateData = {};
-    
-    // Handle both name formats (contact person name)
+
     if (name || fullname) {
       updateData.fullname = name || fullname;
     }
-    
+
     if (email) {
-      // Check if email is already in use by another user
-      const existingEmail = await User.findOne({ email: email.toLowerCase(), _id: { $ne: decoded.id } });
+      const existingEmail = await User.findOne({ email: email.toLowerCase(), _id: { $ne: req.userId } });
       if (existingEmail) {
         return res.status(409).json({ message: "Email already in use by another user" });
       }
       updateData.email = email.toLowerCase();
     }
-    
-    // Handle both phone formats
+
     if (phone || phonenumber) {
       const phoneValue = phone || phonenumber;
-      // Check if phone is already in use by another user
-      const existingPhone = await User.findOne({ phonenumber: phoneValue, _id: { $ne: decoded.id } });
+      const existingPhone = await User.findOne({ phonenumber: phoneValue, _id: { $ne: req.userId } });
       if (existingPhone) {
         return res.status(409).json({ message: "Phone number already in use by another user" });
       }
       updateData.phonenumber = phoneValue;
     }
-    
-    if (address !== undefined) {
-      updateData.address = address;
-    }
 
-    // Company specific fields
-    if (companyName !== undefined) {
-      updateData.companyName = companyName;
-    }
-
-    if (companySize !== undefined) {
-      updateData.companySize = companySize;
-    }
-
-    if (website !== undefined) {
-      updateData.website = website;
-    }
-
-    if (aboutCompany !== undefined) {
-      updateData.aboutCompany = aboutCompany;
-    }
+    if (address !== undefined) updateData.address = address;
+    if (companyName !== undefined) updateData.companyName = companyName;
+    if (companySize !== undefined) updateData.companySize = companySize;
+    if (website !== undefined) updateData.website = website;
+    if (aboutCompany !== undefined) updateData.aboutCompany = aboutCompany;
 
     if (socialMedia) {
       updateData.socialMedia = {
@@ -141,7 +109,7 @@ export const updateProfile = async (req, res) => {
     }
 
     const user = await User.findByIdAndUpdate(
-      decoded.id,
+      req.userId,
       { $set: updateData },
       { new: true, runValidators: true }
     ).select("-password -resetPasswordCode -resetPasswordCodeExpiry");
@@ -186,20 +154,15 @@ export const updateProfile = async (req, res) => {
 // Upload company logo/profile picture
 export const uploadProfilePicture = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
-    
     if (!req.file) {
       return res.status(400).json({ message: "No file uploaded" });
     }
 
-    // Generate the URL for the uploaded file
     const profilePictureUrl = `/uploads/profiles/${req.file.filename}`;
 
-    // Get old profile picture path to delete it
-    const user = await User.findById(decoded.id);
-    
+    const user = await User.findById(req.userId);
+
     if (!user || user.userType !== "institution") {
-      // Delete uploaded file
       if (req.file.path && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
@@ -213,9 +176,8 @@ export const uploadProfilePicture = async (req, res) => {
       }
     }
 
-    // Update user with new profile picture
     const updatedUser = await User.findByIdAndUpdate(
-      decoded.id,
+      req.userId,
       { $set: { profilePicture: profilePictureUrl } },
       { new: true }
     ).select("-password -resetPasswordCode -resetPasswordCodeExpiry");
@@ -229,7 +191,6 @@ export const uploadProfilePicture = async (req, res) => {
     });
   } catch (error) {
     console.error("Error uploading company logo:", error);
-    // Clean up uploaded file on error
     if (req.file?.path && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -240,10 +201,8 @@ export const uploadProfilePicture = async (req, res) => {
 // Delete company logo/profile picture
 export const deleteProfilePicture = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
-    
-    const user = await User.findById(decoded.id);
-    
+    const user = await User.findById(req.userId);
+
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -252,7 +211,6 @@ export const deleteProfilePicture = async (req, res) => {
       return res.status(403).json({ message: "Access denied. This endpoint is for companies only." });
     }
 
-    // Delete the file if it exists
     if (user.profilePicture && user.profilePicture.startsWith("/uploads/")) {
       const filePath = path.join(process.cwd(), user.profilePicture);
       if (fs.existsSync(filePath)) {
@@ -260,11 +218,7 @@ export const deleteProfilePicture = async (req, res) => {
       }
     }
 
-    // Update user to remove profile picture
-    await User.findByIdAndUpdate(
-      decoded.id,
-      { $set: { profilePicture: null } }
-    );
+    await User.findByIdAndUpdate(req.userId, { $set: { profilePicture: null } });
 
     res.status(200).json({
       success: true,
@@ -279,7 +233,6 @@ export const deleteProfilePicture = async (req, res) => {
 // Change password
 export const changePassword = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
     const { oldPassword, newPassword } = req.body;
 
     if (!oldPassword || !newPassword) {
@@ -290,8 +243,8 @@ export const changePassword = async (req, res) => {
       return res.status(400).json({ message: "New password must be at least 6 characters long" });
     }
 
-    const user = await User.findById(decoded.id);
-    
+    const user = await User.findById(req.userId);
+
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -300,25 +253,21 @@ export const changePassword = async (req, res) => {
       return res.status(403).json({ message: "Access denied. This endpoint is for companies only." });
     }
 
-    // Check if user is Google authenticated
     if (user.isGoogleAuth && !user.password) {
-      return res.status(400).json({ 
-        message: "Password change is not available for Google-authenticated accounts" 
+      return res.status(400).json({
+        message: "Password change is not available for Google-authenticated accounts"
       });
     }
 
-    // Verify old password
     const isMatch = await bcrypt.compare(oldPassword, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: "Current password is incorrect" });
     }
 
-    // Hash new password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-    // Update password
-    await User.findByIdAndUpdate(decoded.id, { password: hashedPassword });
+    await User.findByIdAndUpdate(req.userId, { password: hashedPassword });
 
     res.status(200).json({
       success: true,
@@ -333,42 +282,32 @@ export const changePassword = async (req, res) => {
 // Upload verification documents
 export const uploadVerificationDocuments = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
-    
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ message: "No files uploaded" });
     }
 
-    const user = await User.findById(decoded.id);
-    
+    const user = await User.findById(req.userId);
+
     if (!user) {
-      // Clean up uploaded files
       req.files.forEach(file => {
-        if (file.path && fs.existsSync(file.path)) {
-          fs.unlinkSync(file.path);
-        }
+        if (file.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
       });
       return res.status(404).json({ message: "User not found" });
     }
 
     if (user.userType !== "institution") {
-      // Clean up uploaded files
       req.files.forEach(file => {
-        if (file.path && fs.existsSync(file.path)) {
-          fs.unlinkSync(file.path);
-        }
+        if (file.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
       });
       return res.status(403).json({ message: "Access denied. This endpoint is for companies only." });
     }
 
-    // Find or create verification record
-    let verification = await CompanyVerification.findOne({ companyId: decoded.id });
-    
+    let verification = await CompanyVerification.findOne({ companyId: req.userId });
+
     if (!verification) {
-      verification = new CompanyVerification({ companyId: decoded.id });
+      verification = new CompanyVerification({ companyId: req.userId });
     }
 
-    // Add new documents to the verification record
     const newDocuments = req.files.map((file, index) => ({
       filename: file.filename,
       originalName: file.originalname,
@@ -381,7 +320,6 @@ export const uploadVerificationDocuments = async (req, res) => {
     verification.verificationStatus = "pending";
     await verification.save();
 
-    // Update company to reset verification status if it was previously rejected
     if (user.verificationStatus === "rejected") {
       user.verificationStatus = "pending";
       user.rejectionReason = null;
@@ -398,12 +336,9 @@ export const uploadVerificationDocuments = async (req, res) => {
     });
   } catch (error) {
     console.error("Error uploading verification documents:", error);
-    // Clean up uploaded files on error
     if (req.files) {
       req.files.forEach(file => {
-        if (file.path && fs.existsSync(file.path)) {
-          fs.unlinkSync(file.path);
-        }
+        if (file.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
       });
     }
     res.status(500).json({ message: error.message || "Failed to upload verification documents" });
@@ -413,11 +348,9 @@ export const uploadVerificationDocuments = async (req, res) => {
 // Get company verification status and documents
 export const getVerificationStatus = async (req, res) => {
   try {
-    const decoded = verifyToken(req);
-    
-    const user = await User.findById(decoded.id)
+    const user = await User.findById(req.userId)
       .select("-password -resetPasswordCode -resetPasswordCodeExpiry");
-    
+
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -426,7 +359,7 @@ export const getVerificationStatus = async (req, res) => {
       return res.status(403).json({ message: "Access denied. This endpoint is for companies only." });
     }
 
-    const verification = await CompanyVerification.findOne({ companyId: decoded.id });
+    const verification = await CompanyVerification.findOne({ companyId: req.userId });
 
     res.status(200).json({
       success: true,

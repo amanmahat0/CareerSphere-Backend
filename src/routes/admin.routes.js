@@ -12,8 +12,13 @@ import {
   rejectCompany,
   deleteCompany,
 } from "../controllers/admin.controller.js";
+import auth from "../middlewares/auth.js";
+import requireRole from "../middlewares/requireRole.js";
 
 const router = express.Router();
+
+router.use(auth);
+router.use(requireRole(["admin"]));
 
 // Applicant management routes
 router.get("/applicants", getAllApplicants);

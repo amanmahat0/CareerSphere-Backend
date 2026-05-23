@@ -68,6 +68,11 @@ const userSchema = new mongoose.Schema({
         enum: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1000+", null],
         default: null,
     },
+    industry: {
+        type: String,
+        default: null,
+        trim: true,
+    },
     website: {
         type: String,
         default: null,
@@ -109,6 +114,15 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: null,
         trim: true,
+    },
+    // Company user role (for RBAC)
+    role: {
+        type: String,
+        enum: ["admin", "recruiter", "interviewer"],
+        default: function() {
+            // Default to "admin" for company users
+            return this.userType === "institution" ? "admin" : null;
+        },
     },
     // Google users are automatically verified
     resetPasswordCode: {
