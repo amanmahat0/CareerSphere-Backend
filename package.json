@@ -4,6 +4,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
+    "start": "node index.js",
     "test": "node test-api.js",
     "dev": "nodemon index.js",
     "seed": "node seed.js"
@@ -16,7 +17,7 @@
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
-    "dotenv": "^17.2.4",
+    "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "groq-sdk": "^1.2.0",
     "jsonwebtoken": "^9.0.3",
