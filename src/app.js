@@ -12,6 +12,7 @@ import resumeRoutes from "./routes/resume.routes.js";
 import applicationRoutes from "./routes/application.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
+import chatbotRoute from "./chatbot/chatbotRoute.js";
 
 connectDB();
 
@@ -42,6 +43,9 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.get("/home", (req, res) => {
   res.json({ message: "API is running... Hello world" });
 });
+
+// Public routes (no auth required) — register before any auth middleware
+app.use("/api/chatbot", chatbotRoute);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/jobs", jobRoutes);

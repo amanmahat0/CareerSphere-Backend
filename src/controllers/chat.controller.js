@@ -1,8 +1,8 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 import User from "../models/User.model.js";
 import Application from "../models/Application.model.js";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 export const chat = async (req, res) => {
   try {
@@ -12,7 +12,7 @@ export const chat = async (req, res) => {
       return res.status(400).json({ success: false, message: "Message is required" });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
+    if (!process.env.GROQ_API_KEY) {
       return res.status(503).json({ success: false, message: "Chat service is not configured" });
     }
 
@@ -31,7 +31,7 @@ export const chat = async (req, res) => {
         ).join("\n")
       : "No applications yet.";
 
-    const systemPrompt = `You are CareerSphere Assistant, a friendly and knowledgeable career guide for job seekers.
+    const systemPrompt = `You are CareerSphere Assistant, a friendly and knowledgeable career guide for job seekers in Nepal.
 
 User: ${user?.fullname || "Applicant"} (${user?.applicantType || "Student"})
 
@@ -52,21 +52,24 @@ Rules:
 - If unsure about something, say so honestly
 - Do not answer questions unrelated to careers, jobs, or the platform`;
 
-    // Convert conversation history to Gemini format (last 8 exchanges)
-    const geminiHistory = history.slice(-8).map(msg => ({
-      role: msg.role === "user" ? "user" : "model",
-      parts: [{ text: msg.content }],
+    // Convert conversation history to Groq/OpenAI format (last 8 exchanges)
+    const historyMessages = history.slice(-8).map(msg => ({
+      role: msg.role === "user" ? "user" : "assistant",
+      content: msg.content,
     }));
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
-      systemInstruction: systemPrompt,
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...historyMessages,
+        { role: "user", content: message.trim() },
+      ],
+      max_tokens: 512,
+      temperature: 0.7,
     });
 
-    const chatSession = model.startChat({ history: geminiHistory });
-    const result = await chatSession.sendMessage(message.trim());
-    const reply = result.response.text();
-
+    const reply = completion.choices[0]?.message?.content || "";
     res.json({ success: true, reply });
   } catch (error) {
     console.error("Chat error:", error.message);
