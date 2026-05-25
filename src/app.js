@@ -20,6 +20,7 @@ const app = express();
 app.use(express.json());
 
 const allowedOrigins = [
+  "https://career-sphere-frontend-6aku.vercel.app",
   "http://localhost:5173",
   "http://localhost:3000",
   "http://127.0.0.1:5173",
@@ -35,22 +36,9 @@ app.use(
         callback(new Error("Not allowed by CORS"));
       }
     },
-
     credentials: true,
-
-    methods: [
-      "GET",
-      "POST",
-      "PUT",
-      "DELETE",
-      "PATCH",
-      "OPTIONS",
-    ],
-
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-    ],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
