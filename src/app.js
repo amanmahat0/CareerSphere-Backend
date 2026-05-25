@@ -28,10 +28,6 @@ const allowedOrigins = [
 
 const cors = require("cors");
 
-const allowedOrigins = [
-  "https://career-sphere-frontend-6aku.vercel.app",
-  "http://localhost:5173",
-];
 
 app.use(
   cors({
