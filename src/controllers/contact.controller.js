@@ -1,5 +1,7 @@
 import Contact from "../models/Contact.model.js";
 import Mailjet from "node-mailjet";
+import dotenv from "dotenv";
+dotenv.config();
 
 const mailjet = new Mailjet({
     apiKey: process.env.MAILJET_API_KEY,

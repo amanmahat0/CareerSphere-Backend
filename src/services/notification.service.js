@@ -1,5 +1,7 @@
 import Mailjet from "node-mailjet";
 import Notification from "../models/Notification.model.js";
+import dotenv from "dotenv";
+dotenv.config();
 
 const mailjet = new Mailjet({
   apiKey: process.env.MAILJET_API_KEY,
