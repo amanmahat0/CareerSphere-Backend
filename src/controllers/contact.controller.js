@@ -1,19 +1,15 @@
 import Contact from "../models/Contact.model.js";
 import Mailjet from "node-mailjet";
-import dotenv from "dotenv";
-dotenv.config();
-
-const mailjet = new Mailjet({
-    apiKey: process.env.MAILJET_API_KEY,
-    apiSecret: process.env.MAILJET_SECRET_KEY,
-});
 
 const FROM_EMAIL = "careersphere67@gmail.com";
 const FROM_NAME = "CareerSphere";
 
+const getClient = () =>
+    new Mailjet({ apiKey: process.env.MAILJET_API_KEY, apiSecret: process.env.MAILJET_SECRET_KEY });
+
 const sendMail = async (to, subject, html) => {
     try {
-        await mailjet.post("send", { version: "v3.1" }).request({
+        await getClient().post("send", { version: "v3.1" }).request({
             Messages: [
                 {
                     From: { Email: FROM_EMAIL, Name: FROM_NAME },
