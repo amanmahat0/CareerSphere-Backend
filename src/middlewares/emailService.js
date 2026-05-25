@@ -67,6 +67,9 @@ export const sendVerificationEmail = async (email, code, fullname) => {
     return true;
   } catch (error) {
     console.error("Error sending verification email:", error.message);
+    if (error.response) {
+      console.error("Mailjet response:", JSON.stringify(error.response.data || error.response, null, 2));
+    }
     return false;
   }
 };
