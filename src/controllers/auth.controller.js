@@ -183,35 +183,36 @@ export const forgotPassword = async (req, res) => {
       return res.status(400).json({ message: "Email is required" });
     }
 
-    // Find user by email and userType
-    const user = await User.findOne({ 
+    console.log(`[forgotPassword] Request for email=${email} userType=${userType}`);
+
+    const user = await User.findOne({
       email: email.toLowerCase(),
       userType: userType || "applicant"
     });
 
     if (!user) {
-      // Don't reveal if user exists for security
-      return res.status(200).json({ 
-        message: "If the email exists, a verification code has been sent" 
+      const anyUser = await User.findOne({ email: email.toLowerCase() });
+      console.log(`[forgotPassword] User not found for userType=${userType}. Exists with different userType: ${anyUser ? anyUser.userType : "no"}`);
+      return res.status(200).json({
+        message: "If the email exists, a verification code has been sent"
       });
     }
 
-    // Generate 6-digit verification code
+    console.log(`[forgotPassword] User found: ${user._id}, sending email...`);
+
     const verificationCode = generateVerificationCode();
     const codeExpiry = new Date();
-    codeExpiry.setMinutes(codeExpiry.getMinutes() + 5); // Code expires in 5 minutes
+    codeExpiry.setMinutes(codeExpiry.getMinutes() + 5);
 
-    // Save code to user
     user.resetPasswordCode = verificationCode;
     user.resetPasswordCodeExpiry = codeExpiry;
     await user.save();
 
-    // Send verification email
     const emailSent = await sendVerificationEmail(email, verificationCode, user.fullname);
+    console.log(`[forgotPassword] Email sent: ${emailSent}`);
 
-    return res.status(200).json({ 
+    return res.status(200).json({
       message: "If the email exists, a verification code has been sent",
-      // Remove this in production - only for development
       code: process.env.NODE_ENV === "development" ? verificationCode : undefined
     });
   } catch (err) {
