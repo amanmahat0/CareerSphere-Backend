@@ -26,16 +26,40 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
-  credentials: true,
-}));
+const cors = require("cors");
+
+const allowedOrigins = [
+  "https://career-sphere-frontend-6aku.vercel.app",
+  "http://localhost:5173",
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+
+    credentials: true,
+
+    methods: [
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE",
+      "PATCH",
+      "OPTIONS",
+    ],
+
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+    ],
+  })
+);
 
 // Serve static files for uploads
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
