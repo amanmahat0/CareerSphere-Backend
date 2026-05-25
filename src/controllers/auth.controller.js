@@ -1,73 +1,9 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import nodemailer from "nodemailer";
 import User from "../models/User.model.js";
 import dotenv from "dotenv";
+import { sendVerificationEmail, generateVerificationCode } from "../middlewares/emailService.js";
 dotenv.config();
-
-
-
-// Helper function to generate 6-digit code
-const generateVerificationCode = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-};
-
-
-const transporter = nodemailer.createTransport({
-  service: "Gmail",
-  auth: {
-    user: process.env.EMAIL_USER || "careersphere67@gmail.com",
-    pass: process.env.EMAIL_PASS, // <-- MUST be App Password
-  },
-});
-
-// Helper function to send verification email
-const sendVerificationEmail = async (email, code, fullname) => {
-  const mailOptions = {
-    from: process.env.EMAIL_USER || "noreply@careersphere.com",
-    to: email,
-    subject: "CareerSphere - Password Reset Code",
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: linear-gradient(135deg, #1f3a8a 0%, #3b82f6 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-          <h1 style="color: white; margin: 0; font-size: 28px;">CareerSphere</h1>
-          <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0 0;">Password Reset Request</p>
-        </div>
-        <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
-          <p style="color: #333; font-size: 16px; margin-bottom: 20px;">Hi <strong>${fullname}</strong>,</p>
-          <p style="color: #555; font-size: 14px; line-height: 1.6; margin-bottom: 25px;">
-            We received a request to reset your password. Use the verification code below to proceed with resetting your password. This code will expire in <strong>5 minutes</strong>.
-          </p>
-          <div style="background: white; border: 2px solid #1f3a8a; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 25px;">
-            <p style="color: #999; font-size: 12px; margin: 0 0 10px 0; text-transform: uppercase;">Verification Code</p>
-            <p style="color: #1f3a8a; font-size: 32px; letter-spacing: 5px; font-weight: bold; margin: 0; font-family: 'Courier New', monospace;">${code}</p>
-          </div>
-          <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; border-radius: 4px; margin-bottom: 25px;">
-            <p style="color: #856404; font-size: 13px; margin: 0;">
-              <strong>Security Notice:</strong> Never share this code with anyone. CareerSphere support will never ask for your verification code.
-            </p>
-          </div>
-          <p style="color: #555; font-size: 14px; line-height: 1.6; margin-bottom: 15px;">
-            If you didn't request this password reset, you can safely ignore this email. Your account will remain secure.
-          </p>
-          <hr style="border: none; border-top: 1px solid #ddd; margin: 25px 0;">
-          <p style="color: #999; font-size: 12px; text-align: center; margin: 0;">
-            © 2024 CareerSphere. All rights reserved.
-          </p>
-        </div>
-      </div>
-    `,
-  };
-
-  try {
-    await transporter.sendMail(mailOptions);
-    console.log(`Verification email sent to ${email}`);
-    return true;
-  } catch (error) {
-    console.error("Error sending email:", error);
-    return false;
-  }
-};
 
 // Signup for both Applicant and Institution
 export const signup = async (req, res) => {

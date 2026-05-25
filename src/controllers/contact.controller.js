@@ -1,14 +1,30 @@
 import Contact from "../models/Contact.model.js";
-import nodemailer from "nodemailer";
+import Mailjet from "node-mailjet";
 
-// Initialize nodemailer transporter
-const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-        user: "careersphere67@gmail.com",
-        pass: "fxgb svtu zapr hkdt",
-    },
+const mailjet = new Mailjet({
+    apiKey: process.env.MAILJET_API_KEY,
+    apiSecret: process.env.MAILJET_SECRET_KEY,
 });
+
+const FROM_EMAIL = "careersphere67@gmail.com";
+const FROM_NAME = "CareerSphere";
+
+const sendMail = async (to, subject, html) => {
+    try {
+        await mailjet.post("send", { version: "v3.1" }).request({
+            Messages: [
+                {
+                    From: { Email: FROM_EMAIL, Name: FROM_NAME },
+                    To: [{ Email: to }],
+                    Subject: subject,
+                    HTMLPart: html,
+                },
+            ],
+        });
+    } catch (err) {
+        console.error(`Failed to send email to ${to}:`, err.message);
+    }
+};
 
 // Submit contact form
 export const submitContactForm = async (req, res) => {
@@ -44,79 +60,64 @@ export const submitContactForm = async (req, res) => {
         await contact.save();
 
         // Send confirmation email to user
-        try {
-            await transporter.sendMail({
-                from: "noreply@careersphere.com.np",
-                to: email,
-                subject: "CareerSphere - We received your message",
-                html: `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                        <div style="background: linear-gradient(135deg, #1f3a8a 0%, #3b82f6 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-                            <h1 style="color: white; margin: 0; font-size: 28px;">CareerSphere</h1>
-                            <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0 0;">Thank you for contacting us!</p>
-                        </div>
-                        <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
-                            <p style="color: #333; font-size: 16px; margin-bottom: 20px;">Hi <strong>${name}</strong>,</p>
-                            <p style="color: #555; font-size: 14px; line-height: 1.6; margin-bottom: 25px;">
-                                We have received your message regarding "<strong>${subject}</strong>". Our team will review it and get back to you as soon as possible.
-                            </p>
-                            <div style="background: white; border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
-                                <p style="color: #999; font-size: 12px; margin: 0 0 10px 0; text-transform: uppercase;">Your Message</p>
-                                <p style="color: #333; font-size: 14px; margin: 0; white-space: pre-wrap;">${message}</p>
-                            </div>
-                            <p style="color: #555; font-size: 14px; line-height: 1.6;">
-                                Typically, we respond within 24-48 business hours.
-                            </p>
-                            <hr style="border: none; border-top: 1px solid #ddd; margin: 25px 0;">
-                            <p style="color: #999; font-size: 12px; text-align: center; margin: 0;">
-                                © 2026 CareerSphere. All rights reserved.
-                            </p>
-                        </div>
+        await sendMail(
+            email,
+            "CareerSphere - We received your message",
+            `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: linear-gradient(135deg, #1f3a8a 0%, #3b82f6 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+                    <h1 style="color: white; margin: 0; font-size: 28px;">CareerSphere</h1>
+                    <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0 0;">Thank you for contacting us!</p>
+                </div>
+                <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
+                    <p style="color: #333; font-size: 16px; margin-bottom: 20px;">Hi <strong>${name}</strong>,</p>
+                    <p style="color: #555; font-size: 14px; line-height: 1.6; margin-bottom: 25px;">
+                        We have received your message regarding "<strong>${subject}</strong>". Our team will review it and get back to you as soon as possible.
+                    </p>
+                    <div style="background: white; border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <p style="color: #999; font-size: 12px; margin: 0 0 10px 0; text-transform: uppercase;">Your Message</p>
+                        <p style="color: #333; font-size: 14px; margin: 0; white-space: pre-wrap;">${message}</p>
                     </div>
-                `
-            });
-        } catch (emailError) {
-            console.error("Error sending confirmation email:", emailError);
-            // Don't fail the request if email fails
-        }
+                    <p style="color: #555; font-size: 14px; line-height: 1.6;">
+                        Typically, we respond within 24-48 business hours.
+                    </p>
+                    <hr style="border: none; border-top: 1px solid #ddd; margin: 25px 0;">
+                    <p style="color: #999; font-size: 12px; text-align: center; margin: 0;">
+                        © 2026 CareerSphere. All rights reserved.
+                    </p>
+                </div>
+            </div>`
+        );
 
         // Send notification to admin
-        try {
-            await transporter.sendMail({
-                from: "noreply@careersphere.com.np",
-                to: "support@careersphere.com.np",
-                subject: `New Contact Form: ${subject}`,
-                html: `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                        <h2 style="color: #1f3a8a;">New Contact Form Submission</h2>
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <tr>
-                                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Name:</strong></td>
-                                <td style="padding: 10px; border: 1px solid #ddd;">${name}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Email:</strong></td>
-                                <td style="padding: 10px; border: 1px solid #ddd;">${email}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Phone:</strong></td>
-                                <td style="padding: 10px; border: 1px solid #ddd;">${phone || "Not provided"}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Subject:</strong></td>
-                                <td style="padding: 10px; border: 1px solid #ddd;">${subject}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 10px; border: 1px solid #ddd;"><strong>Message:</strong></td>
-                                <td style="padding: 10px; border: 1px solid #ddd; white-space: pre-wrap;">${message}</td>
-                            </tr>
-                        </table>
-                    </div>
-                `
-            });
-        } catch (adminEmailError) {
-            console.error("Error sending admin notification:", adminEmailError);
-        }
+        await sendMail(
+            "careersphere67@gmail.com",
+            `New Contact Form: ${subject}`,
+            `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #1f3a8a;">New Contact Form Submission</h2>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd;"><strong>Name:</strong></td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">${name}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd;"><strong>Email:</strong></td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">${email}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd;"><strong>Phone:</strong></td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">${phone || "Not provided"}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd;"><strong>Subject:</strong></td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">${subject}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd;"><strong>Message:</strong></td>
+                        <td style="padding: 10px; border: 1px solid #ddd; white-space: pre-wrap;">${message}</td>
+                    </tr>
+                </table>
+            </div>`
+        );
 
         return res.status(201).json({
             success: true,

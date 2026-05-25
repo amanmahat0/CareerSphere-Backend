@@ -1,34 +1,29 @@
-import nodemailer from "nodemailer";
+import Mailjet from "node-mailjet";
 import Notification from "../models/Notification.model.js";
 
-// Initialize email transporter with Gmail service
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER || "careersphere67@gmail.com",
-    pass: process.env.EMAIL_PASS || "fxgb svtu zapr hkdt",
-  },
+const mailjet = new Mailjet({
+  apiKey: process.env.MAILJET_API_KEY,
+  apiSecret: process.env.MAILJET_SECRET_KEY,
 });
 
-/**
- * Send email using Nodemailer
- * @param {string} to - Recipient email address
- * @param {string} subject - Email subject
- * @param {string} htmlBody - HTML body of the email
- */
+const FROM_EMAIL = "careersphere67@gmail.com";
+const FROM_NAME = "CareerSphere";
+
 export const sendEmail = async (to, subject, htmlBody) => {
   try {
-    const mailOptions = {
-      from: process.env.EMAIL_USER || "careersphere67@gmail.com",
-      to,
-      subject,
-      html: htmlBody,
-    };
-    await transporter.sendMail(mailOptions);
+    await mailjet.post("send", { version: "v3.1" }).request({
+      Messages: [
+        {
+          From: { Email: FROM_EMAIL, Name: FROM_NAME },
+          To: [{ Email: to }],
+          Subject: subject,
+          HTMLPart: htmlBody,
+        },
+      ],
+    });
     console.log(`Email sent successfully to ${to}`);
   } catch (error) {
     console.error(`Failed to send email to ${to}:`, error.message);
-    // Do not throw — let the API continue even if email fails
   }
 };
 
