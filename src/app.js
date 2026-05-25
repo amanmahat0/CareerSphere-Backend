@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import path from "path";
-import { connectDB } from "./config/db.js";
+export { connectDB } from "./config/db.js";
 import authRoutes from "./routes/auth.routes.js";
 import jobRoutes from "./routes/job.routes.js";
 import contactRoutes from "./routes/contact.routes.js";
@@ -13,8 +13,6 @@ import applicationRoutes from "./routes/application.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import chatbotRoute from "./chatbot/chatbotRoute.js";
-
-connectDB();
 
 const app = express();
 app.use(express.json());
