@@ -3,6 +3,16 @@ import Resume from "../models/Resume.model.js";
 import Job from "../models/Job.model.js";
 import { createNotification } from "../services/notification.service.js";
 
+// Pipeline step order for skip detection (FIX 2)
+const PIPELINE_STEPS = ["shortlisted", "test", "interview", "offer", "hired"];
+
+// Emit pipeline_update socket event to applicant (FIX 11)
+const emitPipelineUpdate = (applicantUserId, payload) => {
+  if (global.io) {
+    global.io.to(`notifications-${applicantUserId}`).emit("pipeline_update", payload);
+  }
+};
+
 // Submit job application
 export const submitJobApplication = async (req, res) => {
   try {
@@ -48,11 +58,22 @@ export const submitJobApplication = async (req, res) => {
       });
     }
 
+    // Snapshot the resume at the moment of submission so future edits don't affect this application
+    const resumeSnapshot = {
+      personalInfo: resume.personalInfo?.toObject?.() ?? resume.personalInfo,
+      education:    (resume.education    || []).map(e => e.toObject?.() ?? e),
+      experience:   (resume.experience   || []).map(e => e.toObject?.() ?? e),
+      skills:       [...(resume.skills   || [])],
+      projects:     (resume.projects     || []).map(p => p.toObject?.() ?? p),
+      certifications: (resume.certifications || []).map(c => c.toObject?.() ?? c),
+    };
+
     // Create new application
     const application = new Application({
       jobId,
       userId: req.userId,
       resumeId: resume._id,
+      resumeSnapshot,
       coverLetter,
     });
 
@@ -289,11 +310,27 @@ export const withdrawApplication = async (req, res) => {
       });
     }
 
-    // Only allow withdrawal at certain stages
-    if (!["shortlisted", "test"].includes(application.interviewStep)) {
+    // FIX 9: Allow withdrawal until a terminal state or final decision is reached
+    const terminalSteps = ["hired", "rejected", "withdrawn", "expired"];
+    if (terminalSteps.includes(application.interviewStep)) {
       return res.status(400).json({
         success: false,
-        message: "Cannot withdraw application after interview has been scheduled",
+        message: "Cannot withdraw an application that is already in a terminal state",
+      });
+    }
+    if (
+      application.interviewStep === "offer" &&
+      ["accepted", "declined", "negotiating"].includes(application.offerResponse)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot withdraw after an offer decision has already been made",
+      });
+    }
+    if (application.interviewStep === "interview" && application.interviewResult) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot withdraw after the interview result has been recorded",
       });
     }
 
@@ -325,6 +362,13 @@ export const withdrawApplication = async (req, res) => {
     // Trigger notification to company
     const notificationService = await import("../services/notification.service.js");
     notificationService.notifyCompanyApplicationWithdrawn(application);
+
+    // FIX 11: Emit pipeline update to applicant
+    emitPipelineUpdate(application.userId._id.toString(), {
+      applicationId: application._id,
+      interviewStep: "withdrawn",
+      interviewStatus: application.interviewStatus,
+    });
 
     res.status(200).json({
       success: true,
@@ -451,6 +495,25 @@ export const updateInterviewStep = async (req, res) => {
         success: false,
         message: "Application not found",
       });
+    }
+
+    // FIX 2: Auto-populate skippedSteps when jumping pipeline steps
+    if (interviewStep && interviewStep !== application.interviewStep) {
+      const fromIdx = PIPELINE_STEPS.indexOf(application.interviewStep);
+      const toIdx   = PIPELINE_STEPS.indexOf(interviewStep);
+      if (fromIdx !== -1 && toIdx > fromIdx + 1) {
+        if (!application.skippedSteps) application.skippedSteps = [];
+        for (let i = fromIdx + 1; i < toIdx; i++) {
+          const skippableSteps = ["test", "interview", "offer"];
+          if (skippableSteps.includes(PIPELINE_STEPS[i])) {
+            application.skippedSteps.push({
+              step: PIPELINE_STEPS[i],
+              skippedAt: new Date(),
+              skippedBy: req.userId,
+            });
+          }
+        }
+      }
     }
 
     // Update interview workflow fields
@@ -619,6 +682,13 @@ export const updateInterviewStep = async (req, res) => {
       { path: "jobId", select: "title company" },
     ]);
 
+    // FIX 11: Emit pipeline update
+    emitPipelineUpdate(application.userId._id.toString(), {
+      applicationId: application._id,
+      interviewStep: application.interviewStep,
+      interviewStatus: application.interviewStatus,
+    });
+
     res.status(200).json({
       success: true,
       message: "Interview step updated successfully",
@@ -670,6 +740,13 @@ export const shortlistApplication = async (req, res) => {
     // Trigger notification to applicant
     const notificationService = await import("../services/notification.service.js");
     notificationService.notifyApplicantShortlisted(application);
+
+    // FIX 11: Emit pipeline update
+    emitPipelineUpdate(application.userId._id.toString(), {
+      applicationId: application._id,
+      interviewStep: "shortlisted",
+      interviewStatus: "pending",
+    });
 
     res.status(200).json({
       success: true,
@@ -788,6 +865,13 @@ export const handleTestAssignment = async (req, res) => {
     const notificationService = await import("../services/notification.service.js");
     notificationService.notifyApplicantTestAssigned(application);
 
+    // FIX 11: Emit pipeline update
+    emitPipelineUpdate(application.userId._id.toString(), {
+      applicationId: application._id,
+      interviewStep: "test",
+      interviewStatus: "scheduled",
+    });
+
     res.status(200).json({ success: true, message: "Test assigned successfully", data: application });
   } catch (error) {
     console.error("Error assigning test:", error);
@@ -870,23 +954,55 @@ export const handleInterviewSchedule = async (req, res) => {
       return res.status(400).json({ success: false, message: "Location required for offline interview" });
     }
 
+    // FIX 5: Cross-applicant conflict detection (warning only)
+    const scheduledDate = new Date(interviewDate);
+    const windowStart = new Date(scheduledDate.getTime() - 2 * 60 * 60 * 1000);
+    const windowEnd   = new Date(scheduledDate.getTime() + 2 * 60 * 60 * 1000);
+    const conflictingApps = await Application.find({
+      _id: { $ne: id },
+      userId: application.userId._id,
+      interviewStep: "interview",
+      interviewDate: { $gte: windowStart, $lte: windowEnd },
+    }).populate("jobId", "title company");
+    const conflicts = conflictingApps.map(a => ({
+      applicationId: a._id,
+      company: a.jobId?.company,
+      jobTitle: a.jobId?.title,
+      interviewDate: a.interviewDate,
+      interviewTime: a.interviewTime,
+    }));
+
     application.interviewStep = "interview";
     application.interviewStatus = "scheduled";
     application.interviewType = interviewType;
-    application.interviewDate = new Date(interviewDate);
+    application.interviewDate = scheduledDate;
     application.interviewTime = interviewTime;
     application.meetingLink = meetingLink || "";
     application.interviewLocation = interviewLocation || "";
     application.interviewers = interviewers || [];
     application.updatedDate = Date.now();
 
+    // FIX 7: Push to interviews[] array for multi-round support
+    if (!application.interviews) application.interviews = [];
+    application.interviews.push({
+      round: (application.interviewRound || 1),
+      date: scheduledDate,
+      time: interviewTime,
+      type: interviewType,
+      meetingLink: meetingLink || "",
+      location: interviewLocation || "",
+      interviewers: (interviewers || []).map(i => i.name || i),
+      scheduledAt: new Date(),
+    });
+
     if (!application.auditLog) application.auditLog = [];
     application.auditLog.push({
       action: "interview_scheduled",
-      fromStep: "test",
+      fromStep: application.interviewStep === "interview" ? "interview" : "test",
       toStep: "interview",
       performedBy: req.userId,
       performedByRole: "company",
+      note: `Round ${application.interviewRound || 1}`,
       timestamp: new Date(),
     });
 
@@ -915,7 +1031,19 @@ export const handleInterviewSchedule = async (req, res) => {
       }
     }
 
-    res.status(200).json({ success: true, message: "Interview scheduled successfully", data: application });
+    // FIX 11: Emit pipeline update
+    emitPipelineUpdate(application.userId._id.toString(), {
+      applicationId: application._id,
+      interviewStep: "interview",
+      interviewStatus: "scheduled",
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Interview scheduled successfully",
+      data: application,
+      conflicts: conflicts.length > 0 ? conflicts : undefined,
+    });
   } catch (error) {
     console.error("Error scheduling interview:", error);
     res.status(400).json({ success: false, message: error.message });
@@ -993,12 +1121,13 @@ export const handleOfferSend = async (req, res) => {
     application.interviewStep = "offer";
     application.interviewStatus = "offer_sent";
     application.salary = salary;
-    application.currency = currency || "USD";
+    application.currency = currency || "NPR";
     application.joiningDate = new Date(joiningDate);
     application.benefits = benefits || "";
     application.contractFile = contractFile || "";
     application.offerExpiryDate = offerExpiryDate ? new Date(offerExpiryDate) : null;
     application.offerResponse = "pending";
+    application.offerStatus = "pending"; // FIX 8
     application.updatedDate = Date.now();
 
     if (!application.auditLog) application.auditLog = [];
@@ -1020,6 +1149,14 @@ export const handleOfferSend = async (req, res) => {
     // Trigger notification
     const notificationService = await import("../services/notification.service.js");
     notificationService.notifyApplicantOfferReceived(application);
+
+    // FIX 11: Emit pipeline update
+    emitPipelineUpdate(application.userId._id.toString(), {
+      applicationId: application._id,
+      interviewStep: "offer",
+      interviewStatus: "offer_sent",
+      offerStatus: "pending",
+    });
 
     res.status(200).json({ success: true, message: "Offer sent successfully", data: application });
   } catch (error) {
@@ -1062,10 +1199,24 @@ export const handleOfferResponse = async (req, res) => {
     application.offerResponse = offerResponse;
     application.offerResponseNotes = offerResponseNotes || "";
 
+    // FIX 8: Negotiate — push to offerNegotiation thread and set offerStatus
     if (offerResponse === "negotiating") {
       application.counterOfferSalary = counterOfferSalary || null;
       application.counterOfferJoiningDate = counterOfferJoiningDate ? new Date(counterOfferJoiningDate) : null;
       application.counterOfferMessage = counterOfferMessage || "";
+      application.offerStatus = "negotiation";
+      if (!application.offerNegotiation) application.offerNegotiation = [];
+      application.offerNegotiation.push({
+        from: "applicant",
+        notes: counterOfferMessage || offerResponseNotes || "",
+        proposedSalary: counterOfferSalary || undefined,
+        proposedJoiningDate: counterOfferJoiningDate ? new Date(counterOfferJoiningDate) : undefined,
+        date: new Date(),
+      });
+    } else if (offerResponse === "accepted") {
+      application.offerStatus = "accepted";
+    } else if (offerResponse === "rejected") {
+      application.offerStatus = "declined";
     }
 
     application.updatedDate = Date.now();
@@ -1090,6 +1241,25 @@ export const handleOfferResponse = async (req, res) => {
     // Trigger notification to company
     const notificationService = await import("../services/notification.service.js");
     notificationService.notifyCompanyOfferResponse(application);
+
+    // FIX 11: Emit pipeline update to applicant (so wizard auto-refreshes)
+    emitPipelineUpdate(application.userId._id.toString(), {
+      applicationId: application._id,
+      interviewStep: "offer",
+      offerResponse,
+      offerStatus: application.offerStatus,
+    });
+    // Also emit to company room so their wizard updates
+    if (application.jobId?.postedBy && global.io) {
+      global.io
+        .to(`notifications-${application.jobId.postedBy}`)
+        .emit("pipeline_update", {
+          applicationId: application._id,
+          interviewStep: "offer",
+          offerResponse,
+          offerStatus: application.offerStatus,
+        });
+    }
 
     res.status(200).json({ success: true, message: "Offer response recorded successfully", data: application });
   } catch (error) {
@@ -1145,6 +1315,13 @@ export const handleHireConfirmation = async (req, res) => {
     // Trigger notification
     const notificationService = await import("../services/notification.service.js");
     notificationService.notifyApplicantHired(application);
+
+    // FIX 11: Emit pipeline update
+    emitPipelineUpdate(application.userId._id.toString(), {
+      applicationId: application._id,
+      interviewStep: "hired",
+      interviewStatus: "completed",
+    });
 
     res.status(200).json({ success: true, message: "Candidate marked as hired successfully", data: application });
   } catch (error) {
@@ -1252,6 +1429,218 @@ export const getApplicationAuditLog = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching audit log:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * FIX 1: Revoke hire — move candidate from hired back to offer
+ */
+export const revokeHire = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ success: false, message: "Reason is required to revoke hire" });
+    }
+
+    const application = await Application.findById(id)
+      .populate("userId")
+      .populate("jobId");
+
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+
+    if (application.interviewStep !== "hired") {
+      return res.status(400).json({ success: false, message: "Can only revoke hire from the hired step" });
+    }
+
+    if (!application.revertHistory) application.revertHistory = [];
+    application.revertHistory.push({
+      fromStep: "hired",
+      toStep: "offer",
+      reason: reason.trim(),
+      date: new Date(),
+      by: req.userId,
+    });
+
+    application.interviewStep = "offer";
+    application.interviewStatus = "offer_sent";
+    application.offerStatus = "pending";
+    application.offerResponse = "pending";
+    application.startDate = null;
+    application.hiringSummary = "";
+    application.status = "shortlisted";
+    application.updatedDate = Date.now();
+
+    if (!application.auditLog) application.auditLog = [];
+    application.auditLog.push({
+      action: "hire_revoked",
+      fromStep: "hired",
+      toStep: "offer",
+      performedBy: req.userId,
+      performedByRole: "company",
+      note: reason.trim(),
+      timestamp: new Date(),
+    });
+
+    await application.save();
+    await application.populate([
+      { path: "userId", select: "fullname email" },
+      { path: "jobId", select: "title company" },
+    ]);
+
+    // Notify applicant
+    await createNotification(
+      application.userId._id,
+      "applicant",
+      "company_notification",
+      `Your hire at ${application.jobId?.company} has been revoked. Please check your offer status.`,
+      application._id
+    );
+
+    // FIX 11: Emit pipeline update
+    emitPipelineUpdate(application.userId._id.toString(), {
+      applicationId: application._id,
+      interviewStep: "offer",
+      interviewStatus: "offer_sent",
+      offerStatus: "pending",
+    });
+
+    res.status(200).json({ success: true, message: "Hire revoked successfully", data: application });
+  } catch (error) {
+    console.error("Error revoking hire:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * FIX 10: Nudge offer — send reminder to applicant (rate-limited 1/24h)
+ */
+export const nudgeOffer = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const application = await Application.findById(id)
+      .populate("userId")
+      .populate("jobId");
+
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+
+    if (application.interviewStep !== "offer") {
+      return res.status(400).json({ success: false, message: "Can only nudge at the offer step" });
+    }
+
+    // Rate limit: 1 nudge per 24 hours
+    if (application.lastNudgedAt) {
+      const hoursSinceLastNudge = (Date.now() - application.lastNudgedAt.getTime()) / (1000 * 60 * 60);
+      if (hoursSinceLastNudge < 24) {
+        const hoursLeft = Math.ceil(24 - hoursSinceLastNudge);
+        return res.status(429).json({
+          success: false,
+          message: `You can send another reminder in ${hoursLeft} hour(s)`,
+        });
+      }
+    }
+
+    application.lastNudgedAt = new Date();
+    application.updatedDate = Date.now();
+    await application.save();
+
+    await createNotification(
+      application.userId._id,
+      "applicant",
+      "company_notification",
+      `${application.jobId?.company} is waiting for your response to their job offer for ${application.jobId?.title}. Please respond at your earliest convenience.`,
+      application._id
+    );
+
+    res.status(200).json({ success: true, message: "Reminder sent to applicant" });
+  } catch (error) {
+    console.error("Error sending nudge:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * FIX 8: Revise offer — company responds to applicant negotiation
+ */
+export const reviseOffer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { salary, joiningDate, benefits, notes } = req.body;
+
+    const application = await Application.findById(id)
+      .populate("userId")
+      .populate("jobId");
+
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+
+    if (application.interviewStep !== "offer") {
+      return res.status(400).json({ success: false, message: "Can only revise offer at the offer step" });
+    }
+
+    // Update offer terms
+    if (salary !== undefined) application.salary = salary;
+    if (joiningDate !== undefined) application.joiningDate = joiningDate ? new Date(joiningDate) : application.joiningDate;
+    if (benefits !== undefined) application.benefits = benefits;
+
+    application.offerStatus = "revised";
+    application.offerResponse = "pending";
+    application.updatedDate = Date.now();
+
+    // Push to negotiation thread
+    if (!application.offerNegotiation) application.offerNegotiation = [];
+    application.offerNegotiation.push({
+      from: "company",
+      notes: notes || "",
+      proposedSalary: salary || undefined,
+      proposedJoiningDate: joiningDate ? new Date(joiningDate) : undefined,
+      date: new Date(),
+    });
+
+    if (!application.auditLog) application.auditLog = [];
+    application.auditLog.push({
+      action: "offer_revised",
+      fromStep: "offer",
+      toStep: "offer",
+      performedBy: req.userId,
+      performedByRole: "company",
+      note: notes || "Offer revised",
+      timestamp: new Date(),
+    });
+
+    await application.save();
+    await application.populate([
+      { path: "userId", select: "fullname email" },
+      { path: "jobId", select: "title company" },
+    ]);
+
+    // Notify applicant
+    await createNotification(
+      application.userId._id,
+      "applicant",
+      "company_notification",
+      `${application.jobId?.company} has revised their job offer for ${application.jobId?.title}. Please review and respond.`,
+      application._id
+    );
+
+    // FIX 11: Emit pipeline update
+    emitPipelineUpdate(application.userId._id.toString(), {
+      applicationId: application._id,
+      interviewStep: "offer",
+      offerStatus: "revised",
+    });
+
+    res.status(200).json({ success: true, message: "Offer revised successfully", data: application });
+  } catch (error) {
+    console.error("Error revising offer:", error);
     res.status(400).json({ success: false, message: error.message });
   }
 };

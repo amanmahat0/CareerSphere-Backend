@@ -16,6 +16,11 @@ const applicationSchema = new mongoose.Schema({
     ref: "Resume",
     required: true,
   },
+  // Snapshot of the resume at the time of application — immutable per submission
+  resumeSnapshot: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
+  },
   coverLetter: {
     type: String,
     required: true,
@@ -23,7 +28,7 @@ const applicationSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ["pending", "shortlisted", "rejected", "accepted", "withdrawn"],
+    enum: ["pending", "shortlisted", "rejected", "accepted", "withdrawn", "expired"],
     default: "pending",
   },
   appliedDate: {
@@ -34,7 +39,8 @@ const applicationSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
-  // Interview Pipeline Steps
+
+  // ── Interview Pipeline ────────────────────────────────────────────────
   interviewStep: {
     type: String,
     enum: ["shortlisted", "test", "interview", "offer", "hired", "withdrawn", "rejected"],
@@ -50,7 +56,27 @@ const applicationSchema = new mongoose.Schema({
     default: "",
   },
 
-  // Test Step Fields
+  // ── Skipped Steps Tracking (FIX 2) ───────────────────────────────────
+  skippedSteps: [
+    {
+      step: { type: String, enum: ["test", "interview", "offer"] },
+      skippedAt: { type: Date, default: Date.now },
+      skippedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    },
+  ],
+
+  // ── Revert History (FIX 1) ───────────────────────────────────────────
+  revertHistory: [
+    {
+      fromStep: { type: String },
+      toStep: { type: String },
+      reason: { type: String },
+      date: { type: Date, default: Date.now },
+      by: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    },
+  ],
+
+  // ── Test Fields ───────────────────────────────────────────────────────
   testType: {
     type: String,
     enum: ["skill_assessment", "coding_test", "aptitude_test"],
@@ -89,8 +115,12 @@ const applicationSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  testOverdue: {                         // FIX 3 — flagged by cron after 7 days
+    type: Boolean,
+    default: false,
+  },
 
-  // Interview Step Fields
+  // ── Single-Round Interview Fields (legacy, kept for backward compat) ──
   interviewType: {
     type: String,
     enum: ["online", "offline"],
@@ -129,14 +159,34 @@ const applicationSchema = new mongoose.Schema({
     },
   ],
 
-  // Offer Step Fields
+  // ── Multiple Interview Rounds (FIX 7) ─────────────────────────────────
+  interviewRound: { type: Number, default: 1 },
+  interviews: [
+    {
+      round: { type: Number },
+      date: { type: Date },
+      time: { type: String },
+      type: { type: String, enum: ["online", "offline"] },
+      meetingLink: { type: String },
+      location: { type: String },
+      notes: { type: String },
+      interviewers: [String],
+      result: { type: String, enum: ["selected", "not_selected"] },
+      feedback: { type: String },
+      interviewerFeedback: [{ name: String, feedback: String }],
+      scheduledAt: { type: Date, default: Date.now },
+      completedAt: { type: Date },
+    },
+  ],
+
+  // ── Offer Fields ──────────────────────────────────────────────────────
   salary: {
     type: Number,
     default: null,
   },
   currency: {
     type: String,
-    default: "USD",
+    default: "NPR",
   },
   joiningDate: {
     type: Date,
@@ -150,6 +200,17 @@ const applicationSchema = new mongoose.Schema({
     type: String,
     default: "",
   },
+  offerExpiryDate: {
+    type: Date,
+    default: null,
+  },
+  // Unified offer status (FIX 6, FIX 8)
+  offerStatus: {
+    type: String,
+    enum: ["pending", "accepted", "declined", "negotiation", "expired", "revised"],
+    default: "pending",
+  },
+  // Legacy offer response (kept for backward compat)
   offerResponse: {
     type: String,
     enum: ["pending", "accepted", "rejected", "negotiating", "expired"],
@@ -159,25 +220,24 @@ const applicationSchema = new mongoose.Schema({
     type: String,
     default: "",
   },
-  offerExpiryDate: {
-    type: Date,
-    default: null,
-  },
-  counterOfferSalary: {
-    type: Number,
-    default: null,
-  },
-  counterOfferJoiningDate: {
-    type: Date,
-    default: null,
-  },
-  counterOfferMessage: {
-    type: String,
-    maxLength: 500,
-    default: "",
-  },
+  // Offer negotiation thread (FIX 8)
+  offerNegotiation: [
+    {
+      from: { type: String, enum: ["applicant", "company"] },
+      notes: { type: String },
+      proposedSalary: { type: Number },
+      proposedJoiningDate: { type: Date },
+      date: { type: Date, default: Date.now },
+    },
+  ],
+  lastNudgedAt: { type: Date, default: null }, // FIX 10 — rate-limit nudges
 
-  // Hired Step Fields
+  // Legacy counter-offer fields (backward compat)
+  counterOfferSalary: { type: Number, default: null },
+  counterOfferJoiningDate: { type: Date, default: null },
+  counterOfferMessage: { type: String, maxLength: 500, default: "" },
+
+  // ── Hired Fields ──────────────────────────────────────────────────────
   startDate: {
     type: Date,
     default: null,
@@ -191,36 +251,26 @@ const applicationSchema = new mongoose.Schema({
     default: "",
   },
 
-  // Withdrawal
-  withdrawalReason: {
-    type: String,
-    default: "",
-  },
-  withdrawnAt: {
-    type: Date,
-    default: null,
-  },
+  // ── Rejection ─────────────────────────────────────────────────────────
+  rejectionReason: { type: String, default: "" },
+  rejectedAt: { type: Date, default: null },
+  rejectedAtStep: { type: String, default: "" }, // FIX 1
 
-  // Tracking Fields
-  lastViewedAt: {
-    type: Date,
-    default: null,
-  },
-  reminderSentAt: {
-    type: Date,
-    default: null,
-  },
+  // ── Withdrawal ────────────────────────────────────────────────────────
+  withdrawalReason: { type: String, default: "" },
+  withdrawnAt: { type: Date, default: null },
 
-  // Audit Log
+  // ── Tracking ──────────────────────────────────────────────────────────
+  lastViewedAt: { type: Date, default: null },
+  reminderSentAt: { type: Date, default: null },
+
+  // ── Audit Log ─────────────────────────────────────────────────────────
   auditLog: [
     {
       action: { type: String },
       fromStep: { type: String },
       toStep: { type: String },
-      performedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-      },
+      performedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
       performedByRole: { type: String },
       note: { type: String },
       timestamp: { type: Date, default: Date.now },
@@ -228,7 +278,6 @@ const applicationSchema = new mongoose.Schema({
   ],
 });
 
-// Create a compound unique index to prevent duplicate applications
 applicationSchema.index({ jobId: 1, userId: 1 }, { unique: true });
 
 export default mongoose.model("Application", applicationSchema);

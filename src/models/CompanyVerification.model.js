@@ -16,6 +16,11 @@ const companyVerificationSchema = new mongoose.Schema({
                 type: String,
                 required: true,
             },
+            documentName: {
+                type: String,
+                trim: true,
+                default: '',
+            },
             documentType: {
                 type: String,
                 enum: ["registration_certificate", "business_license", "tax_id", "other"],

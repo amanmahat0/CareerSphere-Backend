@@ -56,6 +56,15 @@ router.put("/:id/interview/offer-response", requireRole(["applicant"]), applicat
 // Hire confirmation - RBAC: company or admin only
 router.put("/:id/interview/hire", requireRole(['admin', 'institution']), applicationController.handleHireConfirmation);
 
+// FIX 1: Revoke hire
+router.patch("/:id/revoke-hire", requireRole(['admin', 'institution']), applicationController.revokeHire);
+
+// FIX 10: Nudge offer — rate-limited reminder to applicant
+router.post("/:id/nudge-offer", requireRole(['admin', 'institution']), applicationController.nudgeOffer);
+
+// FIX 8: Revise offer — company responds to negotiation
+router.put("/:id/interview/revise-offer", requireRole(['admin', 'institution']), applicationController.reviseOffer);
+
 // Withdraw application
 router.post("/:id/withdraw", applicationController.withdrawApplication);
 

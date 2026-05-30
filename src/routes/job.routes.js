@@ -1,10 +1,11 @@
 import express from "express";
-import { 
-    createJob, 
-    getAllJobs, 
-    getJobById, 
-    updateJob, 
-    deleteJob 
+import {
+    createJob,
+    getAllJobs,
+    getMyJobs,
+    getJobById,
+    updateJob,
+    deleteJob
 } from "../controllers/job.controller.js";
 
 const router = express.Router();
@@ -14,6 +15,9 @@ router.post("/", createJob);
 
 // GET /api/jobs - Get all jobs (with optional filters)
 router.get("/", getAllJobs);
+
+// GET /api/jobs/mine - Get jobs posted by the authenticated company (must be before /:id)
+router.get("/mine", getMyJobs);
 
 // GET /api/jobs/:id - Get a single job by ID
 router.get("/:id", getJobById);

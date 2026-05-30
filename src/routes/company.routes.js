@@ -10,6 +10,8 @@ import {
   changePassword,
   uploadVerificationDocuments,
   getVerificationStatus,
+  getCompanyApplicants,
+  sendCompanyNotification,
 } from "../controllers/company.controller.js";
 import auth from "../middlewares/auth.js";
 
@@ -114,5 +116,9 @@ router.post("/documents/upload", documentUpload.array("documents", 5), uploadVer
 
 // Get verification status
 router.get("/verification-status", getVerificationStatus);
+
+// Notifications
+router.get("/notifications/applicants", getCompanyApplicants);
+router.post("/notifications/send", sendCompanyNotification);
 
 export default router;

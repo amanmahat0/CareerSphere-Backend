@@ -13,6 +13,7 @@ import applicationRoutes from "./routes/application.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import chatbotRoute from "./chatbot/chatbotRoute.js";
+import certificateRoutes from "./routes/certificate.routes.js";
 
 const app = express();
 app.use(express.json());
@@ -60,5 +61,6 @@ app.use("/api/resume", resumeRoutes);
 app.use("/api/applications", applicationRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/certificates", certificateRoutes);
 
 export default app;

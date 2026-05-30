@@ -1,26 +1,24 @@
 import Contact from "../models/Contact.model.js";
-import Mailjet from "node-mailjet";
+import { BrevoClient } from "@getbrevo/brevo";
 
 const FROM_EMAIL = "careersphere67@gmail.com";
 const FROM_NAME = "CareerSphere";
 
-const getClient = () =>
-    new Mailjet({ apiKey: process.env.MAILJET_API_KEY, apiSecret: process.env.MAILJET_SECRET_KEY });
+const getClient = () => new BrevoClient({ apiKey: process.env.BREVO_API_KEY });
 
-const sendMail = async (to, subject, html) => {
+const sendMail = async (to, subject, htmlContent) => {
     try {
-        await getClient().post("send", { version: "v3.1" }).request({
-            Messages: [
-                {
-                    From: { Email: FROM_EMAIL, Name: FROM_NAME },
-                    To: [{ Email: to }],
-                    Subject: subject,
-                    HTMLPart: html,
-                },
-            ],
+        await getClient().transactionalEmails.sendTransacEmail({
+            sender: { email: FROM_EMAIL, name: FROM_NAME },
+            to: [{ email: to }],
+            subject,
+            htmlContent,
         });
     } catch (err) {
         console.error(`Failed to send email to ${to}:`, err.message);
+        if (err.response) {
+            console.error("Brevo response:", JSON.stringify(err.response.body || err.response, null, 2));
+        }
     }
 };
 

@@ -3,6 +3,7 @@ import http from "http";
 import app, { connectDB } from "./src/app.js";
 import { initializeSocket } from "./src/socket/socketManager.js";
 import startOfferExpiryJob from "./src/jobs/offerExpiry.job.js";
+import startTestDeadlineJob from "./src/jobs/testDeadlineCron.js";
 
 const PORT = process.env.PORT || 5000;
 
@@ -16,5 +17,8 @@ server.listen(PORT, async () => {
   await connectDB();
   startOfferExpiryJob().catch(err => {
     console.error("Failed to start offer expiry job:", err.message);
+  });
+  startTestDeadlineJob().catch(err => {
+    console.error("Failed to start test deadline job:", err.message);
   });
 });

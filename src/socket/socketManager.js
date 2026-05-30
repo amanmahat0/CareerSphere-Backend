@@ -117,6 +117,16 @@ export const emitNotification = (io, userId, notification) => {
 };
 
 /**
+ * Emit a pipeline_update event to an applicant's notification room (FIX 11)
+ * @param {Server} io - Socket.IO server instance
+ * @param {string} applicantUserId - Applicant's user ID
+ * @param {Object} payload - { applicationId, interviewStep, interviewStatus, ... }
+ */
+export const emitPipelineUpdate = (io, applicantUserId, payload) => {
+  io.to(`notifications-${applicantUserId}`).emit('pipeline_update', payload);
+};
+
+/**
  * Create room name for user notifications
  * @param {string} userId - User ID
  */
@@ -142,6 +152,7 @@ export const isUserConnected = (userId) => {
 export default {
   initializeSocket,
   emitNotification,
+  emitPipelineUpdate,
   getNotificationRoom,
   getActiveUsers,
   isUserConnected,

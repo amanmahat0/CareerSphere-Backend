@@ -2,68 +2,82 @@ import Application from "../models/Application.model.js";
 import notificationService from "../services/notification.service.js";
 
 /**
- * Scheduled job to handle offer expiry
- * Runs daily at 9:00 AM
+ * FIX 6: Scheduled job to handle offer expiry — runs hourly
  */
 const startOfferExpiryJob = async () => {
   try {
     const cron = (await import("node-cron")).default;
-    
-    // Cron job runs every day at 9:00 AM (0 9 * * *)
-    cron.schedule("0 9 * * *", async () => {
-    try {
-      console.log("Starting offer expiry check job...");
 
-      // Find all pending offers that have expired
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+    // Hourly schedule
+    cron.schedule("0 * * * *", async () => {
+      try {
+        console.log("Starting offer expiry check job...");
 
-      const expiredOffers = await Application.find({
-        interviewStep: "offer",
-        offerResponse: "pending",
-        offerExpiryDate: { $lt: today },
-      })
-        .populate("userId")
-        .populate("jobId");
+        const now = new Date();
 
-      // Update each expired offer
-      let updatedCount = 0;
-      for (const application of expiredOffers) {
-        application.offerResponse = "expired";
-        application.updatedDate = Date.now();
+        const expiredOffers = await Application.find({
+          interviewStep: "offer",
+          offerStatus: { $nin: ["accepted", "declined", "expired"] },
+          offerExpiryDate: { $lt: now },
+        })
+          .populate("userId")
+          .populate("jobId");
 
-        if (!application.auditLog) application.auditLog = [];
-        application.auditLog.push({
-          action: "offer_expired",
-          fromStep: "offer",
-          toStep: "offer",
-          note: "Offer validity period expired",
-          timestamp: new Date(),
-        });
+        let updatedCount = 0;
+        for (const application of expiredOffers) {
+          application.offerStatus = "expired";
+          application.offerResponse = "expired";
+          application.interviewStep = "rejected";
+          application.status = "expired";
+          application.rejectionReason = "Offer expired without response";
+          application.rejectedAt = now;
+          application.rejectedAtStep = "offer";
+          application.updatedDate = Date.now();
 
-        await application.save();
+          if (!application.auditLog) application.auditLog = [];
+          application.auditLog.push({
+            action: "offer_expired",
+            fromStep: "offer",
+            toStep: "rejected",
+            note: "Offer validity period expired (auto)",
+            timestamp: now,
+          });
 
-        // Send notifications
-        try {
-          await notificationService.notifyApplicantOfferExpired(application);
-          await notificationService.notifyCompanyOfferExpired(application);
-        } catch (notifError) {
-          console.error(`Failed to send expiry notifications for app ${application._id}:`, notifError.message);
+          await application.save();
+
+          // Notify both sides
+          try {
+            await notificationService.notifyApplicantOfferExpired(application);
+            await notificationService.notifyCompanyOfferExpired(application);
+          } catch (notifError) {
+            console.error(`Failed to send expiry notifications for app ${application._id}:`, notifError.message);
+          }
+
+          // FIX 11: Emit pipeline update to applicant
+          if (global.io && application.userId?._id) {
+            global.io
+              .to(`notifications-${application.userId._id}`)
+              .emit("pipeline_update", {
+                applicationId: application._id,
+                interviewStep: "rejected",
+                offerStatus: "expired",
+              });
+          }
+
+          updatedCount++;
         }
 
-        updatedCount++;
+        if (updatedCount > 0) {
+          console.log(`Offer expiry job: ${updatedCount} offer(s) auto-expired.`);
+        }
+      } catch (error) {
+        console.error("Error in offer expiry job:", error.message);
       }
-
-      console.log(`Offer expiry job completed. ${updatedCount} offers marked as expired.`);
-    } catch (error) {
-      console.error("Error in offer expiry job:", error.message);
-    }
     });
 
-    console.log("Offer expiry cron job scheduled (9 AM daily)");
+    console.log("Offer expiry cron job scheduled (hourly)");
   } catch (error) {
-    console.warn("node-cron package not installed. Skipping offer expiry scheduling.");
-    console.warn("   Install it with: npm install node-cron");
+    console.warn("node-cron not available. Skipping offer expiry scheduling.");
   }
 };
 

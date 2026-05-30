@@ -1,6 +1,10 @@
 import User from "../models/User.model.js";
 import Resume from "../models/Resume.model.js";
 import CompanyVerification from "../models/CompanyVerification.model.js";
+import Job from "../models/Job.model.js";
+import Application from "../models/Application.model.js";
+import Notification from "../models/Notification.model.js";
+import Contact from "../models/Contact.model.js";
 import bcrypt from "bcrypt";
 
 // Get all applicants
@@ -326,6 +330,15 @@ export const verifyCompany = async (req, res) => {
       return res.status(400).json({ message: "User is not a company" });
     }
 
+    // Block verification if no documents have been uploaded
+    const verificationDoc = await CompanyVerification.findOne({ companyId: id });
+    if (!verificationDoc || !verificationDoc.documents || verificationDoc.documents.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot verify: the company has not uploaded any documents. Ask them to upload verification documents first.",
+      });
+    }
+
     // Update company verification status
     company.isVerified = true;
     company.verificationStatus = "approved";
@@ -423,15 +436,28 @@ export const deleteCompany = async (req, res) => {
       return res.status(400).json({ message: "User is not a company" });
     }
 
-    // Delete associated verification records
-    await CompanyVerification.deleteOne({ companyId: id });
+    // Cascade delete: jobs posted by this company
+    const companyJobs = await Job.find({ company: company.companyName });
+    const jobIds = companyJobs.map(j => j._id);
 
-    // Delete company user account
+    // Delete applications for those jobs
+    if (jobIds.length > 0) {
+      const apps = await Application.find({ jobId: { $in: jobIds } });
+      const appIds = apps.map(a => a._id);
+      if (appIds.length > 0) {
+        await Notification.deleteMany({ applicationId: { $in: appIds } });
+        await Application.deleteMany({ jobId: { $in: jobIds } });
+      }
+      await Job.deleteMany({ _id: { $in: jobIds } });
+    }
+
+    // Delete verification records and company account
+    await CompanyVerification.deleteOne({ companyId: id });
     await User.findByIdAndDelete(id);
 
     res.status(200).json({
       success: true,
-      message: "Company deleted successfully",
+      message: `Company deleted successfully. Removed ${jobIds.length} job(s) and related applications.`,
     });
   } catch (error) {
     console.error("Error deleting company:", error);
@@ -585,6 +611,233 @@ export const updateCompany = async (req, res) => {
   } catch (error) {
     console.error("Error updating company:", error);
     res.status(500).json({ message: "Error updating company", error: error.message });
+  }
+};
+
+// Dashboard analytics
+export const getDashboardStats = async (req, res) => {
+  try {
+    const [
+      totalApplicants,
+      totalCompanies,
+      verifiedCompanies,
+      pendingVerification,
+      totalJobs,
+      totalApplications,
+      pendingApplications,
+      shortlistedApplications,
+      hiredApplications,
+      rejectedApplications,
+      withdrawnApplications,
+      totalContacts,
+      unresolvedContacts,
+    ] = await Promise.all([
+      User.countDocuments({ userType: "applicant" }),
+      User.countDocuments({ userType: "institution" }),
+      User.countDocuments({ userType: "institution", isVerified: true }),
+      User.countDocuments({ userType: "institution", verificationStatus: "pending" }),
+      Job.countDocuments(),
+      Application.countDocuments(),
+      Application.countDocuments({ status: "pending" }),
+      Application.countDocuments({ status: "shortlisted" }),
+      Application.countDocuments({ status: "hired" }),
+      Application.countDocuments({ status: "rejected" }),
+      Application.countDocuments({ status: "withdrawn" }),
+      Contact.countDocuments(),
+      Contact.countDocuments({ status: { $in: ["pending", "read"] } }),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        users: { totalApplicants, totalCompanies, verifiedCompanies, pendingVerification },
+        jobs: { totalJobs },
+        applications: {
+          total: totalApplications,
+          pending: pendingApplications,
+          shortlisted: shortlistedApplications,
+          hired: hiredApplications,
+          rejected: rejectedApplications,
+          withdrawn: withdrawnApplications,
+        },
+        support: { totalContacts, unresolvedContacts },
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching dashboard stats:", error);
+    res.status(500).json({ message: "Error fetching dashboard stats", error: error.message });
+  }
+};
+
+// Get contacts with optional status filter
+export const getContacts = async (req, res) => {
+  try {
+    const { status } = req.query;
+    const filter = status ? { status } : {};
+    const contacts = await Contact.find(filter).sort({ createdAt: -1 });
+    res.status(200).json({ success: true, data: contacts, count: contacts.length });
+  } catch (error) {
+    console.error("Error fetching contacts:", error);
+    res.status(500).json({ message: "Error fetching contacts", error: error.message });
+  }
+};
+
+// =====================================================
+// ADMIN SETTINGS
+// =====================================================
+
+export const getAdminProfile = async (req, res) => {
+  try {
+    const admin = await User.findById(req.user.id).select("-password -resetPasswordCode -resetPasswordCodeExpiry");
+    if (!admin) return res.status(404).json({ success: false, message: "Admin not found" });
+    res.status(200).json({ success: true, data: admin });
+  } catch (error) {
+    console.error("Error fetching admin profile:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch admin profile", error: error.message });
+  }
+};
+
+export const updateAdminProfile = async (req, res) => {
+  try {
+    const { fullname, currentPassword, newPassword } = req.body;
+    const admin = await User.findById(req.user.id);
+    if (!admin) return res.status(404).json({ success: false, message: "Admin not found" });
+
+    const updates = {};
+
+    if (fullname && fullname.trim()) updates.fullname = fullname.trim();
+
+    if (newPassword) {
+      if (!currentPassword) {
+        return res.status(400).json({ success: false, message: "Current password is required to set a new password" });
+      }
+      const isMatch = await bcrypt.compare(currentPassword, admin.password);
+      if (!isMatch) {
+        return res.status(400).json({ success: false, message: "Current password is incorrect" });
+      }
+      if (newPassword.length < 6) {
+        return res.status(400).json({ success: false, message: "New password must be at least 6 characters" });
+      }
+      updates.password = await bcrypt.hash(newPassword, 10);
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ success: false, message: "No updates provided" });
+    }
+
+    const updated = await User.findByIdAndUpdate(req.user.id, { $set: updates }, { new: true })
+      .select("-password -resetPasswordCode -resetPasswordCodeExpiry");
+
+    res.status(200).json({ success: true, message: "Profile updated successfully", data: updated });
+  } catch (error) {
+    console.error("Error updating admin profile:", error);
+    res.status(500).json({ success: false, message: "Failed to update profile", error: error.message });
+  }
+};
+
+export const createAdminAccount = async (req, res) => {
+  try {
+    const { fullname, email, phonenumber, password } = req.body;
+
+    if (!fullname || !email || !password) {
+      return res.status(400).json({ success: false, message: "Full name, email, and password are required" });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+    }
+
+    const lowerEmail = email.toLowerCase().trim();
+    const existing = await User.findOne({ email: lowerEmail });
+    if (existing) {
+      return res.status(409).json({ success: false, message: "Email already registered" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newAdmin = await User.create({
+      fullname: fullname.trim(),
+      email: lowerEmail,
+      phonenumber: phonenumber?.trim() || "N/A",
+      password: hashedPassword,
+      userType: "admin",
+      isVerified: true,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Admin account created successfully",
+      data: { id: newAdmin._id, fullname: newAdmin.fullname, email: newAdmin.email, createdAt: newAdmin.createdAt },
+    });
+  } catch (error) {
+    console.error("Error creating admin account:", error);
+    res.status(500).json({ success: false, message: "Failed to create admin account", error: error.message });
+  }
+};
+
+// =====================================================
+// ADMIN SEND NOTIFICATION
+// =====================================================
+
+export const sendCustomNotification = async (req, res) => {
+  try {
+    const { recipientId, message } = req.body;
+
+    if (!recipientId || !message) {
+      return res.status(400).json({ success: false, message: "recipientId and message are required" });
+    }
+
+    const recipient = await User.findById(recipientId).select("fullname companyName userType");
+    if (!recipient) {
+      return res.status(404).json({ success: false, message: "Recipient not found" });
+    }
+
+    const role = recipient.userType === "institution" ? "company" : "applicant";
+
+    await Notification.create({
+      userId: recipientId,
+      role,
+      type: "admin_notification",
+      message: message.trim(),
+    });
+
+    res.status(200).json({ success: true, message: "Notification sent successfully" });
+  } catch (error) {
+    console.error("Error sending notification:", error);
+    res.status(500).json({ success: false, message: "Failed to send notification", error: error.message });
+  }
+};
+
+export const getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find({ userType: { $in: ["applicant", "institution"] } })
+      .select("fullname companyName email userType")
+      .sort({ userType: 1, fullname: 1 });
+
+    const data = users.map(u => ({
+      id: u._id,
+      name: u.userType === "institution" ? (u.companyName || u.fullname) : u.fullname,
+      email: u.email,
+      type: u.userType,
+    }));
+
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch users", error: error.message });
+  }
+};
+
+export const getAllApplicationsAdmin = async (req, res) => {
+  try {
+    const applications = await Application.find()
+      .populate("userId", "fullname email phonenumber")
+      .populate("jobId", "title company")
+      .populate("resumeId")
+      .sort({ appliedDate: -1 });
+
+    res.status(200).json({ success: true, count: applications.length, data: applications });
+  } catch (error) {
+    console.error("Error fetching all applications (admin):", error);
+    res.status(500).json({ success: false, message: "Failed to fetch applications" });
   }
 };
 

@@ -1,5 +1,8 @@
 import User from "../models/User.model.js";
 import CompanyVerification from "../models/CompanyVerification.model.js";
+import Job from "../models/Job.model.js";
+import Application from "../models/Application.model.js";
+import Notification from "../models/Notification.model.js";
 import path from "path";
 import fs from "fs";
 import bcrypt from "bcrypt";
@@ -311,6 +314,7 @@ export const uploadVerificationDocuments = async (req, res) => {
     const newDocuments = req.files.map((file, index) => ({
       filename: file.filename,
       originalName: file.originalname,
+      documentName: req.body.documentNames?.[index] || '',
       documentType: req.body.documentTypes?.[index] || "other",
       filePath: `/uploads/documents/${file.filename}`,
       uploadedAt: new Date(),
@@ -375,5 +379,71 @@ export const getVerificationStatus = async (req, res) => {
   } catch (error) {
     console.error("Error fetching verification status:", error);
     res.status(500).json({ message: error.message || "Failed to fetch verification status" });
+  }
+};
+
+// Get unique applicants who applied to this company's jobs (for recipient search)
+export const getCompanyApplicants = async (req, res) => {
+  try {
+    const company = await User.findById(req.userId).select("companyName fullname");
+    if (!company) return res.status(401).json({ success: false, message: "Company not found" });
+
+    const companyName = company.companyName || company.fullname;
+    const jobs = await Job.find({ company: companyName }).select("_id");
+    const jobIds = jobs.map(j => j._id);
+
+    const applications = await Application.find({ jobId: { $in: jobIds } })
+      .populate("userId", "fullname email")
+      .lean();
+
+    // Deduplicate by userId
+    const seen = new Set();
+    const applicants = [];
+    for (const app of applications) {
+      if (app.userId && !seen.has(String(app.userId._id))) {
+        seen.add(String(app.userId._id));
+        applicants.push({
+          id:    app.userId._id,
+          name:  app.userId.fullname,
+          email: app.userId.email,
+          type:  "applicant",
+        });
+      }
+    }
+
+    res.status(200).json({ success: true, data: applicants });
+  } catch (error) {
+    console.error("Error fetching company applicants:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Send a custom notification to an applicant
+export const sendCompanyNotification = async (req, res) => {
+  try {
+    const { recipientId, message } = req.body;
+    if (!recipientId || !message) {
+      return res.status(400).json({ success: false, message: "recipientId and message are required" });
+    }
+
+    const recipient = await User.findById(recipientId).select("fullname userType");
+    if (!recipient) {
+      return res.status(404).json({ success: false, message: "Recipient not found" });
+    }
+    if (recipient.userType !== "applicant") {
+      return res.status(400).json({ success: false, message: "You can only send notifications to applicants" });
+    }
+
+    await Notification.create({
+      userId:  recipientId,
+      role:    "applicant",
+      type:    "company_notification",
+      message: message.trim(),
+    });
+
+    res.status(200).json({ success: true, message: "Notification sent successfully" });
+  } catch (error) {
+    console.error("Error sending company notification:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };

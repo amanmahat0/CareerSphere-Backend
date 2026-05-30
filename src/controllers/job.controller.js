@@ -38,12 +38,20 @@ export const createJob = async (req, res) => {
             });
         }
 
+        // Block unverified companies from posting jobs
+        if (!user.isVerified) {
+            return res.status(403).json({
+                success: false,
+                message: "Your company account must be verified before you can post jobs. Please submit your verification documents.",
+            });
+        }
+
         // Use companyName if available, otherwise use fullname (for backward compatibility)
         const companyName = user.companyName || user.fullname;
         if (!companyName) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Company information not found in your profile" 
+            return res.status(400).json({
+                success: false,
+                message: "Company information not found in your profile"
             });
         }
 
@@ -112,6 +120,33 @@ export const createJob = async (req, res) => {
     }
 };
 
+// Get jobs posted by the authenticated company
+export const getMyJobs = async (req, res) => {
+    try {
+        const decoded = verifyToken(req);
+        const user = await User.findById(decoded.id);
+        if (!user) {
+            return res.status(401).json({ success: false, message: "User not found." });
+        }
+
+        const companyName = user.companyName || user.fullname;
+        if (!companyName) {
+            return res.status(400).json({ success: false, message: "Company name not found in profile." });
+        }
+
+        const jobs = await Job.find({ company: companyName }).sort({ postDate: -1 });
+
+        res.status(200).json({
+            success: true,
+            count: jobs.length,
+            jobs: jobs.map(j => j.toObject()),
+        });
+    } catch (error) {
+        console.error("Error fetching company jobs:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch jobs", error: error.message });
+    }
+};
+
 // Get all jobs
 export const getAllJobs = async (req, res) => {
     try {
@@ -128,14 +163,17 @@ export const getAllJobs = async (req, res) => {
         const companyUsers = await User.find({
             companyName: { $in: companyNames },
             userType: "institution",
-        }).select("companyName profilePicture");
+        }).select("companyName profilePicture isVerified");
 
-        const picMap = {};
-        companyUsers.forEach(u => { if (u.companyName) picMap[u.companyName] = u.profilePicture; });
+        const companyMap = {};
+        companyUsers.forEach(u => {
+            if (u.companyName) companyMap[u.companyName] = { profilePicture: u.profilePicture, isVerified: u.isVerified };
+        });
 
         const jobsWithLogos = jobs.map(j => ({
             ...j.toObject(),
-            companyLogo: picMap[j.company] || j.logo || null,
+            companyLogo: companyMap[j.company]?.profilePicture || j.logo || null,
+            companyIsVerified: companyMap[j.company]?.isVerified || false,
         }));
 
         res.status(200).json({
@@ -171,11 +209,12 @@ export const getJobById = async (req, res) => {
         const companyUser = await User.findOne({
             companyName: job.company,
             userType: "institution",
-        }).select("profilePicture email phonenumber address companySize industry website aboutCompany socialMedia");
+        }).select("profilePicture email phonenumber address companySize industry website aboutCompany socialMedia isVerified");
 
         const jobWithLogo = {
             ...job.toObject(),
             companyLogo: companyUser?.profilePicture || job.logo || null,
+            companyIsVerified: companyUser?.isVerified || false,
             companyInfo: companyUser ? {
                 email:       companyUser.email,
                 phone:       companyUser.phonenumber,
@@ -185,6 +224,7 @@ export const getJobById = async (req, res) => {
                 website:     companyUser.website,
                 about:       companyUser.aboutCompany,
                 socialMedia: companyUser.socialMedia,
+                isVerified:  companyUser.isVerified,
             } : null,
         };
 
