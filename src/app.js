@@ -19,6 +19,7 @@ const app = express();
 app.use(express.json());
 
 const allowedOrigins = [
+  "https://career-sphere-frontend-one.vercel.app",
   "https://career-sphere-frontend-6aku.vercel.app",
   "http://localhost:5173",
   "http://localhost:3000",
